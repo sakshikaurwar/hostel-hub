@@ -1,12 +1,28 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
-import { getCurrentUser, getAttendance, getAttendancePercentage, markAttendance, type AttendanceRecord } from "@/lib/dataService";
+import { getCurrentUser, getAttendance, getAttendancePercentage, markBulkAttendance, getRoomNumbers, getStudentsByRoom, type AttendanceRecord } from "@/lib/dataService";
+import { ChevronLeft, ChevronRight, Check } from "lucide-react";
+
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+function getDaysInMonth(year: number, month: number) {
+  return new Date(year, month + 1, 0).getDate();
+}
+
+function formatDate(y: number, m: number, d: number) {
+  return `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
 
 export default function Attendance() {
   const user = getCurrentUser();
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [percentage, setPercentage] = useState(0);
-  const [markForm, setMarkForm] = useState({ studentName: "", studentEmail: "", status: "Present" as AttendanceRecord["status"] });
+  const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
+  const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [checkedStudents, setCheckedStudents] = useState<Record<string, boolean>>({});
+  const [markingSuccess, setMarkingSuccess] = useState(false);
 
   const refresh = () => {
     const data = user?.role === "Student" ? getAttendance(user.email) : getAttendance();
@@ -16,13 +32,77 @@ export default function Attendance() {
 
   useEffect(refresh, []);
 
-  const handleMark = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!markForm.studentName.trim() || !markForm.studentEmail.trim()) return;
-    markAttendance({ ...markForm, date: new Date().toISOString().split("T")[0], markedBy: user?.email || "" });
-    setMarkForm({ studentName: "", studentEmail: "", status: "Present" });
+  // Calendar data for students
+  const attendanceMap = useMemo(() => {
+    const map: Record<string, "Present" | "Absent" | "Late"> = {};
+    records.forEach(r => { map[r.date] = r.status; });
+    return map;
+  }, [records]);
+
+  const daysInMonth = getDaysInMonth(currentYear, currentMonth);
+  const firstDay = new Date(currentYear, currentMonth, 1).getDay();
+
+  const prevMonth = () => {
+    if (currentMonth === 0) { setCurrentMonth(11); setCurrentYear(y => y - 1); }
+    else setCurrentMonth(m => m - 1);
+  };
+  const nextMonth = () => {
+    if (currentMonth === 11) { setCurrentMonth(0); setCurrentYear(y => y + 1); }
+    else setCurrentMonth(m => m + 1);
+  };
+
+  // Staff/Admin: room-based attendance
+  const roomNumbers = getRoomNumbers();
+  const studentsForDate = useMemo(() => {
+    if (!selectedDate) return [];
+    // Get all rooms and their students
+    const result: { roomNumber: string; students: { email: string; name: string }[] }[] = [];
+    roomNumbers.forEach(room => {
+      const students = getStudentsByRoom(room);
+      result.push({ roomNumber: room, students: students.map(s => ({ email: s.email, name: s.name })) });
+    });
+    return result;
+  }, [selectedDate, roomNumbers]);
+
+  const handleDateSelect = (day: number) => {
+    const date = formatDate(currentYear, currentMonth, day);
+    setSelectedDate(date);
+    setCheckedStudents({});
+    setMarkingSuccess(false);
+
+    // Pre-check students who already have attendance for this date
+    const existing = records.filter(r => r.date === date);
+    const checked: Record<string, boolean> = {};
+    existing.forEach(r => {
+      if (r.status === "Present" || r.status === "Late") checked[r.studentEmail] = true;
+    });
+    setCheckedStudents(checked);
+  };
+
+  const handleMarkAttendance = () => {
+    if (!selectedDate || !user) return;
+    const allStudentEmails: { email: string; name: string; roomNumber: string }[] = [];
+    studentsForDate.forEach(room => {
+      room.students.forEach(s => {
+        allStudentEmails.push({ email: s.email, name: s.name, roomNumber: room.roomNumber });
+      });
+    });
+
+    const attendanceRecords = allStudentEmails.map(s => ({
+      studentEmail: s.email,
+      studentName: s.name,
+      roomNumber: s.roomNumber,
+      date: selectedDate,
+      status: (checkedStudents[s.email] ? "Present" : "Absent") as AttendanceRecord["status"],
+      markedBy: user.email,
+    }));
+
+    markBulkAttendance(attendanceRecords);
+    setMarkingSuccess(true);
     refresh();
   };
+
+  const isStudent = user?.role === "Student";
 
   return (
     <DashboardLayout>
@@ -31,7 +111,7 @@ export default function Attendance() {
         <p className="text-muted-foreground">Track and manage hostel attendance</p>
       </div>
 
-      {user?.role === "Student" && (
+      {isStudent && (
         <div className="stat-card mb-6 max-w-sm">
           <p className="text-sm text-muted-foreground mb-2">Your Attendance</p>
           <div className="flex items-end gap-2">
@@ -44,45 +124,89 @@ export default function Attendance() {
         </div>
       )}
 
-      {(user?.role === "Staff" || user?.role === "Admin") && (
+      {/* Calendar */}
+      <div className="bg-card rounded-lg border p-5 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <button onClick={prevMonth} className="p-2 rounded-md hover:bg-muted"><ChevronLeft size={18} /></button>
+          <h3 className="font-semibold text-lg">{MONTHS[currentMonth]} {currentYear}</h3>
+          <button onClick={nextMonth} className="p-2 rounded-md hover:bg-muted"><ChevronRight size={18} /></button>
+        </div>
+
+        <div className="grid grid-cols-7 gap-1">
+          {DAYS.map(d => (
+            <div key={d} className="text-center text-xs font-medium text-muted-foreground py-2">{d}</div>
+          ))}
+          {Array.from({ length: firstDay }).map((_, i) => <div key={`empty-${i}`} />)}
+          {Array.from({ length: daysInMonth }).map((_, i) => {
+            const day = i + 1;
+            const date = formatDate(currentYear, currentMonth, day);
+            const status = attendanceMap[date];
+            const isSelected = selectedDate === date;
+
+            let bgClass = "hover:bg-muted";
+            if (isStudent && status === "Present") bgClass = "bg-success/20 text-success hover:bg-success/30";
+            else if (isStudent && status === "Late") bgClass = "bg-success/20 text-success hover:bg-success/30";
+            else if (isStudent && status === "Absent") bgClass = "bg-destructive/20 text-destructive hover:bg-destructive/30";
+
+            if (!isStudent && isSelected) bgClass = "bg-primary text-primary-foreground";
+
+            return (
+              <button
+                key={day}
+                onClick={() => !isStudent && handleDateSelect(day)}
+                className={`aspect-square flex items-center justify-center rounded-md text-sm font-medium transition-colors ${bgClass} ${!isStudent ? "cursor-pointer" : "cursor-default"}`}
+              >
+                {day}
+              </button>
+            );
+          })}
+        </div>
+
+        {isStudent && (
+          <div className="flex gap-4 mt-4 text-xs">
+            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-success/30" /> Present</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-destructive/30" /> Absent</span>
+          </div>
+        )}
+      </div>
+
+      {/* Staff/Admin: Mark attendance for selected date */}
+      {!isStudent && selectedDate && (
         <div className="bg-card rounded-lg border p-5 mb-6">
-          <h3 className="font-semibold mb-4">Mark Attendance</h3>
-          <form onSubmit={handleMark} className="flex flex-wrap gap-3 items-end">
-            <div>
-              <label className="block text-sm font-medium mb-1">Student Name</label>
-              <input value={markForm.studentName} onChange={e => setMarkForm({ ...markForm, studentName: e.target.value })} className="px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring" required />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Student Email</label>
-              <input value={markForm.studentEmail} onChange={e => setMarkForm({ ...markForm, studentEmail: e.target.value })} className="px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring" required />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Status</label>
-              <select value={markForm.status} onChange={e => setMarkForm({ ...markForm, status: e.target.value as any })} className="px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring">
-                <option>Present</option><option>Absent</option><option>Late</option>
-              </select>
-            </div>
-            <button type="submit" className="px-5 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:opacity-90">Mark</button>
-          </form>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold">Mark Attendance — {selectedDate}</h3>
+            <button onClick={handleMarkAttendance} className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:opacity-90">
+              <Check size={16} /> Save Attendance
+            </button>
+          </div>
+
+          {markingSuccess && (
+            <div className="p-3 rounded-md bg-success/10 text-success text-sm mb-4">Attendance saved successfully!</div>
+          )}
+
+          <div className="space-y-4">
+            {studentsForDate.map(room => (
+              <div key={room.roomNumber} className="border rounded-md p-4">
+                <h4 className="font-medium text-sm mb-3 text-muted-foreground">Room {room.roomNumber}</h4>
+                <div className="space-y-2">
+                  {room.students.map(student => (
+                    <label key={student.email} className="flex items-center gap-3 py-2 px-3 rounded-md hover:bg-muted cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!checkedStudents[student.email]}
+                        onChange={e => setCheckedStudents(prev => ({ ...prev, [student.email]: e.target.checked }))}
+                        className="w-4 h-4 rounded border-border text-primary focus:ring-ring"
+                      />
+                      <span className="text-sm font-medium">{student.name}</span>
+                      <span className="text-xs text-muted-foreground">({student.email})</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
-
-      <div className="bg-card rounded-lg border overflow-x-auto">
-        <table className="data-table">
-          <thead><tr><th>Student</th><th>Date</th><th>Status</th><th>Marked By</th></tr></thead>
-          <tbody>
-            {records.map(r => (
-              <tr key={r.id}>
-                <td className="font-medium">{r.studentName}</td>
-                <td>{r.date}</td>
-                <td><span className={`status-badge ${r.status === "Present" ? "status-resolved" : r.status === "Late" ? "status-pending" : "status-unpaid"}`}>{r.status}</span></td>
-                <td className="text-muted-foreground">{r.markedBy}</td>
-              </tr>
-            ))}
-            {!records.length && <tr><td colSpan={4} className="text-center py-8 text-muted-foreground">No records found</td></tr>}
-          </tbody>
-        </table>
-      </div>
     </DashboardLayout>
   );
 }

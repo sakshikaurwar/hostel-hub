@@ -1,13 +1,14 @@
 import { useState, useEffect } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { getCurrentUser, getComplaints, addComplaint, updateComplaintStatus, type Complaint } from "@/lib/dataService";
-import { Plus, X } from "lucide-react";
+import { Plus, X, Eye } from "lucide-react";
 
 export default function Complaints() {
   const user = getCurrentUser();
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ title: "", description: "", category: "Maintenance", priority: "Medium" as const });
+  const [form, setForm] = useState({ title: "", description: "" });
+  const [viewDescription, setViewDescription] = useState<string | null>(null);
 
   const refresh = () => {
     const data = user?.role === "Student" ? getComplaints(user.email) : getComplaints();
@@ -19,8 +20,16 @@ export default function Complaints() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.title.trim() || !form.description.trim()) return;
-    addComplaint({ ...form, priority: form.priority as Complaint["priority"], createdBy: user?.email || "" });
-    setForm({ title: "", description: "", category: "Maintenance", priority: "Medium" });
+    addComplaint({
+      title: form.title,
+      description: form.description,
+      category: "General",
+      priority: "Medium",
+      createdBy: user?.email || "",
+      createdByName: user?.name || "",
+      roomNumber: user?.room || "N/A",
+    });
+    setForm({ title: "", description: "" });
     setShowForm(false);
     refresh();
   };
@@ -30,6 +39,8 @@ export default function Complaints() {
     refresh();
   };
 
+  const isStaffOrAdmin = user?.role === "Staff" || user?.role === "Admin";
+
   return (
     <DashboardLayout>
       <div className="flex items-center justify-between mb-6">
@@ -37,57 +48,78 @@ export default function Complaints() {
           <h1 className="text-2xl font-bold">Complaints</h1>
           <p className="text-muted-foreground">Manage and track complaints</p>
         </div>
-        <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:opacity-90">
-          {showForm ? <X size={16} /> : <Plus size={16} />}
-          {showForm ? "Cancel" : "New Complaint"}
-        </button>
+        {user?.role === "Student" && (
+          <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:opacity-90">
+            {showForm ? <X size={16} /> : <Plus size={16} />}
+            {showForm ? "Cancel" : "New Complaint"}
+          </button>
+        )}
       </div>
 
-      {showForm && (
+      {/* Student: simplified form with only Title and Description */}
+      {showForm && user?.role === "Student" && (
         <div className="bg-card rounded-lg border p-5 mb-6">
           <h3 className="font-semibold mb-4">Submit a Complaint</h3>
-          <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium mb-1">Title</label>
-              <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring" required />
+              <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring" placeholder="Brief title for your complaint" required />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Category</label>
-              <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring">
-                <option>Maintenance</option><option>IT</option><option>Hygiene</option><option>Security</option><option>Other</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Priority</label>
-              <select value={form.priority} onChange={e => setForm({ ...form, priority: e.target.value as any })} className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring">
-                <option>Low</option><option>Medium</option><option>High</option>
-              </select>
-            </div>
-            <div className="md:col-span-2">
               <label className="block text-sm font-medium mb-1">Description</label>
-              <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} rows={3} className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none" required />
+              <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} rows={3} className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none" placeholder="Describe your complaint in detail" required />
             </div>
-            <div className="md:col-span-2">
-              <button type="submit" className="px-6 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:opacity-90">Submit</button>
-            </div>
+            <button type="submit" className="px-6 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:opacity-90">Submit</button>
           </form>
+        </div>
+      )}
+
+      {/* Description modal */}
+      {viewDescription !== null && (
+        <div className="fixed inset-0 bg-foreground/30 z-50 flex items-center justify-center p-4" onClick={() => setViewDescription(null)}>
+          <div className="bg-card rounded-lg border shadow-lg p-6 max-w-md w-full" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold">Complaint Description</h3>
+              <button onClick={() => setViewDescription(null)} className="p-1 hover:bg-muted rounded"><X size={16} /></button>
+            </div>
+            <p className="text-sm text-muted-foreground">{viewDescription}</p>
+          </div>
         </div>
       )}
 
       <div className="bg-card rounded-lg border overflow-x-auto">
         <table className="data-table">
           <thead>
-            <tr><th>Title</th><th>Category</th><th>Priority</th><th>Status</th><th>Date</th>{(user?.role === "Staff" || user?.role === "Admin") && <th>Action</th>}</tr>
+            <tr>
+              {isStaffOrAdmin && <th>Student Name</th>}
+              {isStaffOrAdmin && <th>Room No.</th>}
+              <th>Title</th>
+              {!isStaffOrAdmin && <th>Category</th>}
+              {!isStaffOrAdmin && <th>Priority</th>}
+              <th>Status</th>
+              <th>Date</th>
+              {isStaffOrAdmin && <th>Action</th>}
+            </tr>
           </thead>
           <tbody>
             {complaints.map(c => (
               <tr key={c.id}>
-                <td className="font-medium">{c.title}</td>
-                <td>{c.category}</td>
-                <td><span className={`status-badge ${c.priority === "High" ? "status-pending" : c.priority === "Medium" ? "status-in-progress" : "status-resolved"}`}>{c.priority}</span></td>
+                {isStaffOrAdmin && <td className="font-medium">{c.createdByName || c.createdBy}</td>}
+                {isStaffOrAdmin && <td>{c.roomNumber || "N/A"}</td>}
+                <td>
+                  {isStaffOrAdmin ? (
+                    <button onClick={() => setViewDescription(c.description)} className="text-primary hover:underline font-medium flex items-center gap-1">
+                      {c.title} <Eye size={14} />
+                    </button>
+                  ) : (
+                    <span className="font-medium">{c.title}</span>
+                  )}
+                </td>
+                {!isStaffOrAdmin && <td>{c.category}</td>}
+                {!isStaffOrAdmin && <td><span className={`status-badge ${c.priority === "High" ? "status-pending" : c.priority === "Medium" ? "status-in-progress" : "status-resolved"}`}>{c.priority}</span></td>}
                 <td><span className={`status-badge ${c.status === "Pending" ? "status-pending" : c.status === "In Progress" ? "status-in-progress" : "status-resolved"}`}>{c.status}</span></td>
                 <td className="text-muted-foreground">{c.createdAt}</td>
-                {(user?.role === "Staff" || user?.role === "Admin") && (
+                {isStaffOrAdmin && (
                   <td>
                     <select value={c.status} onChange={e => handleStatusChange(c.id, e.target.value as Complaint["status"])} className="px-2 py-1 rounded border bg-background text-xs">
                       <option>Pending</option><option>In Progress</option><option>Resolved</option>
@@ -96,7 +128,7 @@ export default function Complaints() {
                 )}
               </tr>
             ))}
-            {!complaints.length && <tr><td colSpan={6} className="text-center py-8 text-muted-foreground">No complaints found</td></tr>}
+            {!complaints.length && <tr><td colSpan={8} className="text-center py-8 text-muted-foreground">No complaints found</td></tr>}
           </tbody>
         </table>
       </div>

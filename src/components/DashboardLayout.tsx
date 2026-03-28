@@ -23,16 +23,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex h-screen overflow-hidden">
-      {/* Mobile overlay */}
       {sidebarOpen && <div className="fixed inset-0 bg-foreground/30 z-30 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
-      {/* Sidebar */}
       <aside className={`fixed lg:static inset-y-0 left-0 z-40 w-64 flex flex-col transition-transform lg:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`} style={{ background: "hsl(var(--sidebar-bg))" }}>
         <div className="flex items-center gap-3 px-6 py-5 border-b" style={{ borderColor: "hsl(var(--sidebar-border))" }}>
           <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-            <span className="text-primary-foreground font-bold text-sm">H</span>
+            <span className="text-primary-foreground font-bold text-sm">M</span>
           </div>
-          <span className="text-lg font-semibold" style={{ color: "hsl(var(--sidebar-primary-foreground))" }}>HostelHub</span>
+          <span className="text-lg font-semibold" style={{ color: "hsl(var(--sidebar-primary-foreground))" }}>MyHostel</span>
         </div>
 
         <nav className="flex-1 py-4 px-3 space-y-1">
@@ -56,7 +54,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       </aside>
 
-      {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="h-16 border-b bg-card flex items-center justify-between px-4 lg:px-6 shrink-0">
           <button className="lg:hidden p-2 rounded-md hover:bg-muted" onClick={() => setSidebarOpen(!sidebarOpen)}>
