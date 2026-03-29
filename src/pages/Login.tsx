@@ -7,6 +7,8 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
+  const [age, setAge] = useState("");
+  const [phone, setPhone] = useState("");
   const [role, setRole] = useState<UserRole>("Student");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
