@@ -102,7 +102,7 @@ export default function Login() {
                 <label className="block text-sm font-medium mb-1.5">Role</label>
                 <select value={role} onChange={e => setRole(e.target.value as UserRole)} className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring">
                   <option value="Student">Student</option>
-                  <option value="Staff">Staff</option>
+                  <option value="Warden">Warden</option>
                   <option value="Admin">Admin</option>
                 </select>
               </div>
