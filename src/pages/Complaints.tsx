@@ -39,7 +39,7 @@ export default function Complaints() {
     refresh();
   };
 
-  const isStaffOrAdmin = user?.role === "Staff" || user?.role === "Admin";
+  const isStaffOrAdmin = user?.role === "Warden" || user?.role === "Admin";
 
   return (
     <DashboardLayout>

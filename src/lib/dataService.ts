@@ -1,6 +1,6 @@
 // Data service layer - replace localStorage calls with API calls for backend integration
 
-export type UserRole = "Student" | "Staff" | "Admin";
+export type UserRole = "Student" | "Warden" | "Admin";
 
 export interface User {
   email: string;
@@ -213,7 +213,7 @@ export function loginUser(email: string, password: string): User | null {
   let role: UserRole = "Student";
   let name = "John Doe";
   if (email.includes("admin")) { role = "Admin"; name = "Admin User"; }
-  else if (email.includes("staff")) { role = "Staff"; name = "Staff Member"; }
+  else if (email.includes("staff") || email.includes("warden")) { role = "Warden"; name = "Warden"; }
 
   const roomStudents = getRoomStudents();
   const roomEntry = roomStudents.find(s => s.email === email);
