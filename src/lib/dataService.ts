@@ -234,6 +234,26 @@ export function logoutUser(): void {
   sessionStorage.removeItem("currentUser");
 }
 
+// Update user profile
+export function updateUserProfile(email: string, updates: Partial<User>): User | null {
+  // Update in registeredUsers
+  const users = getStore<SignupData>("registeredUsers");
+  const idx = users.findIndex(u => u.email === email);
+  if (idx !== -1) {
+    Object.assign(users[idx], updates);
+    setStore("registeredUsers", users);
+  }
+
+  // Update current session
+  const current = getCurrentUser();
+  if (current && current.email === email) {
+    const updated = { ...current, ...updates };
+    sessionStorage.setItem("currentUser", JSON.stringify(updated));
+    return updated;
+  }
+  return current;
+}
+
 // Complaints
 export function getComplaints(userEmail?: string): Complaint[] {
   const all = getStore<Complaint>("complaints");
@@ -294,6 +314,21 @@ export function markPaymentPaid(id: string): void {
   const payments = getStore<Payment>("payments");
   const idx = payments.findIndex(p => p.id === id);
   if (idx !== -1) { payments[idx].status = "Paid"; payments[idx].paidDate = new Date().toISOString().split("T")[0]; setStore("payments", payments); }
+}
+
+export function updatePaymentFees(studentEmail: string, totalFees: number, pendingFees: number): void {
+  const payments = getStore<Payment>("payments");
+  const studentPayments = payments.filter(p => p.studentEmail === studentEmail);
+  if (studentPayments.length > 0) {
+    studentPayments[0].totalFees = totalFees;
+    studentPayments[0].amount = pendingFees;
+    if (pendingFees <= 0) {
+      studentPayments[0].status = "Paid";
+    } else {
+      studentPayments[0].status = "Unpaid";
+    }
+    setStore("payments", payments);
+  }
 }
 
 // Summary stats
