@@ -7,6 +7,8 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
+  const [age, setAge] = useState("");
+  const [phone, setPhone] = useState("");
   const [role, setRole] = useState<UserRole>("Student");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -31,7 +33,7 @@ export default function Login() {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setError("Please enter a valid email"); return; }
     if (password.length < 4) { setError("Password must be at least 4 characters"); return; }
 
-    const user = signupUser({ email, password, name, role });
+    const user = signupUser({ email, password, name, role, age: age ? parseInt(age) : undefined, phone: phone || undefined });
     if (user) {
       navigate("/dashboard");
     } else {
@@ -77,6 +79,16 @@ export default function Login() {
               <div>
                 <label className="block text-sm font-medium mb-1.5">Full Name</label>
                 <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Your full name" className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">Age</label>
+                  <input type="number" value={age} onChange={e => setAge(e.target.value)} placeholder="Age" className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">Phone Number</label>
+                  <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+91 9876543210" className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring" />
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1.5">Email</label>
