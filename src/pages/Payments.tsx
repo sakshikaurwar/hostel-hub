@@ -1,10 +1,13 @@
 import { useState, useEffect, useMemo } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
-import { getCurrentUser, getPayments, markPaymentPaid, type Payment } from "@/lib/dataService";
+import { getCurrentUser, getPayments, markPaymentPaid, updatePaymentFees, type Payment } from "@/lib/dataService";
+import { Pencil, Check, X } from "lucide-react";
 
 export default function Payments() {
   const user = getCurrentUser();
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [editingEmail, setEditingEmail] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ totalFees: 0, pendingFees: 0 });
 
   const refresh = () => {
     setPayments(user?.role === "Student" ? getPayments(user.email) : getPayments());
@@ -13,22 +16,34 @@ export default function Payments() {
   useEffect(refresh, []);
 
   const isStudent = user?.role === "Student";
+  const isAdmin = user?.role === "Admin";
   const totalDue = payments.filter(p => p.status !== "Paid").reduce((s, p) => s + p.amount, 0);
   const totalPaid = payments.filter(p => p.status === "Paid").reduce((s, p) => s + p.amount, 0);
 
-  // Staff/Admin: aggregate per student
   const studentSummary = useMemo(() => {
     if (isStudent) return [];
-    const map: Record<string, { studentName: string; roomNumber: string; totalFees: number; pendingFees: number }> = {};
+    const map: Record<string, { studentEmail: string; studentName: string; roomNumber: string; totalFees: number; pendingFees: number }> = {};
     payments.forEach(p => {
       if (!map[p.studentEmail]) {
-        map[p.studentEmail] = { studentName: p.studentName || p.studentEmail, roomNumber: p.roomNumber || "N/A", totalFees: 0, pendingFees: 0 };
+        map[p.studentEmail] = { studentEmail: p.studentEmail, studentName: p.studentName || p.studentEmail, roomNumber: p.roomNumber || "N/A", totalFees: 0, pendingFees: 0 };
       }
-      map[p.studentEmail].totalFees += p.amount;
+      map[p.studentEmail].totalFees += p.totalFees || p.amount;
       if (p.status !== "Paid") map[p.studentEmail].pendingFees += p.amount;
     });
     return Object.values(map);
   }, [payments, isStudent]);
+
+  const handleEditStart = (s: typeof studentSummary[0]) => {
+    setEditingEmail(s.studentEmail);
+    setEditForm({ totalFees: s.totalFees, pendingFees: s.pendingFees });
+  };
+
+  const handleEditSave = () => {
+    if (!editingEmail) return;
+    updatePaymentFees(editingEmail, editForm.totalFees, editForm.pendingFees);
+    setEditingEmail(null);
+    refresh();
+  };
 
   return (
     <DashboardLayout>
@@ -82,21 +97,43 @@ export default function Payments() {
       {!isStudent && (
         <div className="bg-card rounded-lg border overflow-x-auto">
           <table className="data-table">
-            <thead><tr><th>Student Name</th><th>Room Number</th><th>Total Fees</th><th>Pending Fees</th></tr></thead>
+            <thead><tr><th>Student Name</th><th>Room Number</th><th>Total Fees</th><th>Pending Fees</th>{isAdmin && <th>Action</th>}</tr></thead>
             <tbody>
               {studentSummary.map((s, i) => (
                 <tr key={i}>
                   <td className="font-medium">{s.studentName}</td>
                   <td>{s.roomNumber}</td>
-                  <td>₹{s.totalFees.toLocaleString()}</td>
                   <td>
-                    <span className={s.pendingFees > 0 ? "text-destructive font-medium" : "text-success font-medium"}>
-                      ₹{s.pendingFees.toLocaleString()}
-                    </span>
+                    {editingEmail === s.studentEmail ? (
+                      <input type="number" value={editForm.totalFees} onChange={e => setEditForm(prev => ({ ...prev, totalFees: parseInt(e.target.value) || 0 }))} className="w-24 px-2 py-1 rounded border bg-background text-sm" />
+                    ) : (
+                      `₹${s.totalFees.toLocaleString()}`
+                    )}
                   </td>
+                  <td>
+                    {editingEmail === s.studentEmail ? (
+                      <input type="number" value={editForm.pendingFees} onChange={e => setEditForm(prev => ({ ...prev, pendingFees: parseInt(e.target.value) || 0 }))} className="w-24 px-2 py-1 rounded border bg-background text-sm" />
+                    ) : (
+                      <span className={s.pendingFees > 0 ? "text-destructive font-medium" : "text-success font-medium"}>
+                        ₹{s.pendingFees.toLocaleString()}
+                      </span>
+                    )}
+                  </td>
+                  {isAdmin && (
+                    <td>
+                      {editingEmail === s.studentEmail ? (
+                        <div className="flex gap-1">
+                          <button onClick={handleEditSave} className="p-1 rounded hover:bg-muted text-success"><Check size={16} /></button>
+                          <button onClick={() => setEditingEmail(null)} className="p-1 rounded hover:bg-muted text-destructive"><X size={16} /></button>
+                        </div>
+                      ) : (
+                        <button onClick={() => handleEditStart(s)} className="p-1 rounded hover:bg-muted text-primary"><Pencil size={14} /></button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
-              {!studentSummary.length && <tr><td colSpan={4} className="text-center py-8 text-muted-foreground">No payment records found</td></tr>}
+              {!studentSummary.length && <tr><td colSpan={isAdmin ? 5 : 4} className="text-center py-8 text-muted-foreground">No payment records found</td></tr>}
             </tbody>
           </table>
         </div>
