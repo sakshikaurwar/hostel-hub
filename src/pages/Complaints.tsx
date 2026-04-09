@@ -10,17 +10,19 @@ export default function Complaints() {
   const [form, setForm] = useState({ title: "", description: "" });
   const [viewDescription, setViewDescription] = useState<string | null>(null);
 
-  const refresh = () => {
-    const data = user?.role === "Student" ? getComplaints(user.email) : getComplaints();
+  const refresh = async () => {
+    const data = user?.email ? await getComplaints(user.email) : await getComplaints();
     setComplaints(data);
   };
 
-  useEffect(refresh, []);
+  useEffect(() => {
+    refresh();
+  }, [user]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.title.trim() || !form.description.trim()) return;
-    addComplaint({
+    await addComplaint({
       title: form.title,
       description: form.description,
       category: "General",
@@ -31,15 +33,15 @@ export default function Complaints() {
     });
     setForm({ title: "", description: "" });
     setShowForm(false);
-    refresh();
+    await refresh();
   };
 
-  const handleStatusChange = (id: string, status: Complaint["status"]) => {
-    updateComplaintStatus(id, status);
-    refresh();
+  const handleStatusChange = async (id: string, status: Complaint["status"]) => {
+    await updateComplaintStatus(id, status);
+    await refresh();
   };
 
-  const isStaffOrAdmin = user?.role === "Warden" || user?.role === "Admin";
+  const isWardenOrAdmin = user?.role === "warden" || user?.role === "admin";
 
   return (
     <DashboardLayout>
@@ -48,7 +50,7 @@ export default function Complaints() {
           <h1 className="text-2xl font-bold">Complaints</h1>
           <p className="text-muted-foreground">Manage and track complaints</p>
         </div>
-        {user?.role === "Student" && (
+        {user?.role === "student" && (
           <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:opacity-90">
             {showForm ? <X size={16} /> : <Plus size={16} />}
             {showForm ? "Cancel" : "New Complaint"}
@@ -57,7 +59,7 @@ export default function Complaints() {
       </div>
 
       {/* Student: simplified form with only Title and Description */}
-      {showForm && user?.role === "Student" && (
+      {showForm && user?.role === "student" && (
         <div className="bg-card rounded-lg border p-5 mb-6">
           <h3 className="font-semibold mb-4">Submit a Complaint</h3>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -91,23 +93,23 @@ export default function Complaints() {
         <table className="data-table">
           <thead>
             <tr>
-              {isStaffOrAdmin && <th>Student Name</th>}
-              {isStaffOrAdmin && <th>Room No.</th>}
+              {isWardenOrAdmin && <th>Student Name</th>}
+              {isWardenOrAdmin && <th>Room No.</th>}
               <th>Title</th>
-              {!isStaffOrAdmin && <th>Category</th>}
-              {!isStaffOrAdmin && <th>Priority</th>}
+              {!isWardenOrAdmin && <th>Category</th>}
+              {!isWardenOrAdmin && <th>Priority</th>}
               <th>Status</th>
               <th>Date</th>
-              {isStaffOrAdmin && <th>Action</th>}
+              {isWardenOrAdmin && <th>Action</th>}
             </tr>
           </thead>
           <tbody>
             {complaints.map(c => (
               <tr key={c.id}>
-                {isStaffOrAdmin && <td className="font-medium">{c.createdByName || c.createdBy}</td>}
-                {isStaffOrAdmin && <td>{c.roomNumber || "N/A"}</td>}
+                {isWardenOrAdmin && <td className="font-medium">{c.createdByName || c.createdBy}</td>}
+                {isWardenOrAdmin && <td>{c.roomNumber || "N/A"}</td>}
                 <td>
-                  {isStaffOrAdmin ? (
+                  {isWardenOrAdmin ? (
                     <button onClick={() => setViewDescription(c.description)} className="text-primary hover:underline font-medium flex items-center gap-1">
                       {c.title} <Eye size={14} />
                     </button>
@@ -115,11 +117,11 @@ export default function Complaints() {
                     <span className="font-medium">{c.title}</span>
                   )}
                 </td>
-                {!isStaffOrAdmin && <td>{c.category}</td>}
-                {!isStaffOrAdmin && <td><span className={`status-badge ${c.priority === "High" ? "status-pending" : c.priority === "Medium" ? "status-in-progress" : "status-resolved"}`}>{c.priority}</span></td>}
+                {!isWardenOrAdmin && <td>{c.category}</td>}
+                {!isWardenOrAdmin && <td><span className={`status-badge ${c.priority === "High" ? "status-pending" : c.priority === "Medium" ? "status-in-progress" : "status-resolved"}`}>{c.priority}</span></td>}
                 <td><span className={`status-badge ${c.status === "Pending" ? "status-pending" : c.status === "In Progress" ? "status-in-progress" : "status-resolved"}`}>{c.status}</span></td>
                 <td className="text-muted-foreground">{c.createdAt}</td>
-                {isStaffOrAdmin && (
+                {isWardenOrAdmin && (
                   <td>
                     <select value={c.status} onChange={e => handleStatusChange(c.id, e.target.value as Complaint["status"])} className="px-2 py-1 rounded border bg-background text-xs">
                       <option>Pending</option><option>In Progress</option><option>Resolved</option>

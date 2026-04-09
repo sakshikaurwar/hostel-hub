@@ -1,8 +1,9 @@
 // Data service layer - replace localStorage calls with API calls for backend integration
 
-export type UserRole = "Student" | "Warden" | "Admin";
+export type UserRole = "student" | "warden" | "admin";
 
 export interface User {
+  id: number;
   email: string;
   name: string;
   role: UserRole;
@@ -20,7 +21,7 @@ export interface SignupData {
   email: string;
   password: string;
   name: string;
-  role: UserRole;
+  role: "student" | "warden";
   age?: number;
   address?: string;
   year?: string;
@@ -66,280 +67,900 @@ export interface Payment {
   paidDate?: string;
 }
 
+export interface Student {
+  id: number;
+  name: string;
+  email: string;
+  phone?: string;
+  department?: string;
+  year?: string;
+  room_number?: string;
+  status: 'active' | 'inactive';
+}
+
+export interface Staff {
+  id: number;
+  name: string;
+  role_type: 'Warden' | 'Cleaner' | 'Electrician' | 'Security';
+  phone?: string;
+  salary?: number;
+}
+
+export interface WardenStaff {
+  name: string;
+  role_type: string;
+  phone?: string;
+}
+
+export interface StaffContact {
+  name: string;
+  role: string;
+  phone?: string;
+}
+
+export interface Salary {
+  id: string;
+  staffId: number;
+  roleType: string;
+  staffName: string;
+  monthYear: string;
+  amount: number;
+  status: "Paid" | "Unpaid";
+  paidDate?: string;
+}
+
 export interface RoomStudent {
   email: string;
   name: string;
   roomNumber: string;
 }
 
-function getStore<T>(key: string): T[] {
+export interface Room {
+  room_id: number;
+  room_no: number;
+  capacity: number;
+  occupied: number;
+  status: string;
+  hostel_id?: number;
+}
+
+// Removed localStorage functions - now using API calls
+
+// For compatibility with existing code
+export function getRoomStudents(): RoomStudent[] {
+  return [];
+}
+
+export function getRoomNumbers(): string[] {
+  return [];
+}
+
+export function getStudentsByRoom(roomNumber: string): RoomStudent[] {
+  return [];
+}
+
+// Seed data is no longer needed - all data comes from backend
+export function seedData() {
+  // Data is now managed by backend
+}
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+const TOKEN_KEY = "authToken";
+const USER_KEY = "currentUser";
+
+interface AuthLoginResponse {
+  message: string;
+  role: UserRole;
+  user_id: number;
+  name: string;
+  email: string;
+  token: string;
+}
+
+interface AuthSignupResponse {
+  message: string;
+  role: UserRole;
+  user_id: number;
+  name: string;
+  email: string;
+  token: string;
+}
+
+function getAuthToken(): string | null {
+  return sessionStorage.getItem(TOKEN_KEY);
+}
+
+function setAuthToken(token: string): void {
+  sessionStorage.setItem(TOKEN_KEY, token);
+}
+
+function removeAuthToken(): void {
+  sessionStorage.removeItem(TOKEN_KEY);
+}
+
+function getUserStorage(): User | null {
   try {
-    return JSON.parse(localStorage.getItem(key) || "[]");
+    const data = sessionStorage.getItem(USER_KEY);
+    return data ? (JSON.parse(data) as User) : null;
   } catch {
+    return null;
+  }
+}
+
+function setUserStorage(user: User): void {
+  sessionStorage.setItem(USER_KEY, JSON.stringify(user));
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getAuthToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+async function fetchJson<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
+
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => null);
+    const errorMessage = errorBody?.message || response.statusText || "Request failed";
+    throw new Error(errorMessage);
+  }
+
+  return response.json();
+}
+
+async function postJson<T>(endpoint: string, body: unknown, useAuth = false): Promise<T> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (useAuth) {
+    Object.assign(headers, authHeaders());
+  }
+
+  return fetchJson<T>(`${endpoint}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+}
+
+async function putJson<T>(endpoint: string, body: unknown): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...authHeaders(),
+  };
+
+  return fetchJson<T>(`${endpoint}`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getJson<T>(endpoint: string): Promise<T> {
+  const headers = authHeaders();
+  return fetchJson<T>(endpoint, {
+    method: "GET",
+    headers,
+  });
+}
+
+export async function signupUser(data: SignupData): Promise<{ success: boolean; message: string; user?: User }> {
+  try {
+    const result = await postJson<AuthSignupResponse>("/api/auth/signup", {
+      email: data.email,
+      password: data.password,
+      name: data.name,
+      role: data.role,
+      age: data.age,
+      address: data.address,
+      year: data.year,
+      department: data.department,
+      branch: data.branch,
+      gender: data.gender,
+      phone: data.phone,
+    });
+    const user: User = {
+      id: result.user_id,
+      email: result.email,
+      name: result.name,
+      role: result.role,
+      phone: data.phone,
+      age: data.age,
+      address: data.address,
+      year: data.year,
+      department: data.department,
+      branch: data.branch,
+      gender: data.gender,
+    };
+    setUserStorage(user);
+    setAuthToken(result.token);
+    return { success: true, message: result.message, user };
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : "Signup failed" };
+  }
+}
+
+export async function loginUser(
+  email: string,
+  password: string
+): Promise<{ success: true; user: User } | { success: false; message: string }> {
+  try {
+    const result = await postJson<AuthLoginResponse>("/api/auth/login", { email, password });
+    const user: User = {
+      id: result.user_id,
+      email: result.email,
+      name: result.name,
+      role: result.role,
+    };
+    setUserStorage(user);
+    setAuthToken(result.token);
+    return { success: true, user };
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : "Login failed" };
+  }
+}
+
+export function getCurrentUser(): User | null {
+  const token = getAuthToken();
+  if (!token) return null;
+  return getUserStorage();
+}
+
+export function logoutUser(): void {
+  removeAuthToken();
+  sessionStorage.removeItem(USER_KEY);
+}
+
+// Update user profile
+export async function updateUserProfile(email: string, updates: Partial<User>): Promise<User | null> {
+  try {
+    const current = getCurrentUser();
+    if (current && current.email === email) {
+      const updated = { ...current, ...updates };
+      setUserStorage(updated);
+      return updated;
+    }
+    return current;
+  } catch (error) {
+    console.error("Failed to update user profile:", error);
+    return null;
+  }
+}
+
+// Complaints
+export async function getComplaints(userEmail?: string): Promise<Complaint[]> {
+  try {
+    const result = await fetchJson<any[]>("/api/complaints");
+    
+    if (userEmail) {
+      return result.filter(c => c.createdBy === userEmail).map(c => ({
+        id: String(c.id),
+        title: c.title,
+        description: c.description,
+        category: c.category,
+        priority: c.priority,
+        status: c.status,
+        createdBy: c.createdBy,
+        createdByName: c.createdByName,
+        roomNumber: c.roomNumber,
+        createdAt: c.createdAt,
+      }));
+    }
+    
+    return result.map(c => ({
+      id: String(c.id),
+      title: c.title,
+      description: c.description,
+      category: c.category,
+      priority: c.priority,
+      status: c.status,
+      createdBy: c.createdBy,
+      createdByName: c.createdByName,
+      roomNumber: c.roomNumber,
+      createdAt: c.createdAt,
+    }));
+  } catch (error) {
+    console.error("Failed to fetch complaints:", error);
     return [];
   }
 }
 
-function setStore<T>(key: string, data: T[]): void {
-  localStorage.setItem(key, JSON.stringify(data));
-}
-
-// Room-student mapping (3 students per room)
-export function getRoomStudents(): RoomStudent[] {
-  let data = getStore<RoomStudent>("roomStudents");
-  if (!data.length) {
-    data = [
-      { email: "student1@hostel.com", name: "John Doe", roomNumber: "101" },
-      { email: "student2@hostel.com", name: "Jane Smith", roomNumber: "101" },
-      { email: "student3@hostel.com", name: "Raj Kumar", roomNumber: "101" },
-      { email: "student4@hostel.com", name: "Priya Sharma", roomNumber: "102" },
-      { email: "student5@hostel.com", name: "Amit Patel", roomNumber: "102" },
-      { email: "student6@hostel.com", name: "Sara Khan", roomNumber: "102" },
-      { email: "student7@hostel.com", name: "Vikram Singh", roomNumber: "201" },
-      { email: "student8@hostel.com", name: "Neha Gupta", roomNumber: "201" },
-      { email: "student9@hostel.com", name: "Arjun Reddy", roomNumber: "201" },
-      { email: "student10@hostel.com", name: "Meera Nair", roomNumber: "202" },
-      { email: "student11@hostel.com", name: "Karan Joshi", roomNumber: "202" },
-      { email: "student12@hostel.com", name: "Ananya Das", roomNumber: "202" },
-    ];
-    setStore("roomStudents", data);
-  }
-  return data;
-}
-
-export function getRoomNumbers(): string[] {
-  const students = getRoomStudents();
-  return [...new Set(students.map(s => s.roomNumber))].sort();
-}
-
-export function getStudentsByRoom(roomNumber: string): RoomStudent[] {
-  return getRoomStudents().filter(s => s.roomNumber === roomNumber);
-}
-
-// Seed default data if empty
-export function seedData() {
-  getRoomStudents(); // ensure room data exists
-
-  if (!getStore("complaints").length) {
-    const complaints: Complaint[] = [
-      { id: "c1", title: "Water leakage in Room 204", description: "There is a constant water leak from the ceiling near the window.", category: "Maintenance", priority: "High", status: "Pending", createdBy: "student1@hostel.com", createdByName: "John Doe", roomNumber: "101", createdAt: "2026-03-20" },
-      { id: "c2", title: "Wi-Fi connectivity issues", description: "Wi-Fi drops every 30 minutes on the 3rd floor.", category: "IT", priority: "Medium", status: "In Progress", createdBy: "student2@hostel.com", createdByName: "Jane Smith", roomNumber: "101", createdAt: "2026-03-18" },
-      { id: "c3", title: "Broken window latch", description: "Window latch in Room 112 is broken and needs replacement.", category: "Maintenance", priority: "Low", status: "Resolved", createdBy: "student4@hostel.com", createdByName: "Priya Sharma", roomNumber: "102", createdAt: "2026-03-15" },
-    ];
-    setStore("complaints", complaints);
-  }
-
-  if (!getStore("attendance").length) {
-    const attendance: AttendanceRecord[] = [
-      { id: "a1", studentEmail: "student1@hostel.com", studentName: "John Doe", roomNumber: "101", date: "2026-03-24", status: "Present", markedBy: "staff@hostel.com" },
-      { id: "a2", studentEmail: "student1@hostel.com", studentName: "John Doe", roomNumber: "101", date: "2026-03-23", status: "Present", markedBy: "staff@hostel.com" },
-      { id: "a3", studentEmail: "student1@hostel.com", studentName: "John Doe", roomNumber: "101", date: "2026-03-22", status: "Absent", markedBy: "staff@hostel.com" },
-      { id: "a4", studentEmail: "student2@hostel.com", studentName: "Jane Smith", roomNumber: "101", date: "2026-03-24", status: "Late", markedBy: "staff@hostel.com" },
-      { id: "a5", studentEmail: "student1@hostel.com", studentName: "John Doe", roomNumber: "101", date: "2026-03-21", status: "Present", markedBy: "staff@hostel.com" },
-      { id: "a6", studentEmail: "student1@hostel.com", studentName: "John Doe", roomNumber: "101", date: "2026-03-20", status: "Present", markedBy: "staff@hostel.com" },
-    ];
-    setStore("attendance", attendance);
-  }
-
-  if (!getStore("payments").length) {
-    const payments: Payment[] = [
-      { id: "p1", studentEmail: "student1@hostel.com", studentName: "John Doe", roomNumber: "101", description: "Hostel Fee - Semester 1", amount: 25000, totalFees: 50000, dueDate: "2026-03-01", status: "Paid", paidDate: "2026-02-28" },
-      { id: "p2", studentEmail: "student1@hostel.com", studentName: "John Doe", roomNumber: "101", description: "Mess Fee - March", amount: 5000, totalFees: 5000, dueDate: "2026-03-15", status: "Unpaid" },
-      { id: "p3", studentEmail: "student2@hostel.com", studentName: "Jane Smith", roomNumber: "101", description: "Hostel Fee - Semester 1", amount: 25000, totalFees: 50000, dueDate: "2026-03-01", status: "Paid", paidDate: "2026-02-25" },
-      { id: "p4", studentEmail: "student2@hostel.com", studentName: "Jane Smith", roomNumber: "101", description: "Mess Fee - March", amount: 5000, totalFees: 5000, dueDate: "2026-03-15", status: "Unpaid" },
-      { id: "p5", studentEmail: "student4@hostel.com", studentName: "Priya Sharma", roomNumber: "102", description: "Hostel Fee - Semester 1", amount: 25000, totalFees: 50000, dueDate: "2026-03-01", status: "Unpaid" },
-      { id: "p6", studentEmail: "student5@hostel.com", studentName: "Amit Patel", roomNumber: "102", description: "Laundry Fee - Q1", amount: 1500, totalFees: 1500, dueDate: "2026-04-01", status: "Unpaid" },
-    ];
-    setStore("payments", payments);
-  }
-}
-
-// Auth
-export function signupUser(data: SignupData): User | null {
-  const users = getStore<SignupData>("registeredUsers");
-  if (users.find(u => u.email === data.email)) return null; // already exists
-  users.push(data);
-  setStore("registeredUsers", users);
-
-  // If student, add to room mapping
-  if (data.role === "Student") {
-    const roomStudents = getRoomStudents();
-    // Find a room with less than 3 students or create new room
-    const roomCounts: Record<string, number> = {};
-    roomStudents.forEach(s => { roomCounts[s.roomNumber] = (roomCounts[s.roomNumber] || 0) + 1; });
-    let assignedRoom = "";
-    for (const room of Object.keys(roomCounts).sort()) {
-      if (roomCounts[room] < 3) { assignedRoom = room; break; }
-    }
-    if (!assignedRoom) {
-      const maxRoom = Math.max(0, ...Object.keys(roomCounts).map(Number));
-      assignedRoom = String(maxRoom + 1);
-    }
-    roomStudents.push({ email: data.email, name: data.name, roomNumber: assignedRoom });
-    setStore("roomStudents", roomStudents);
-  }
-
-  const user = loginUser(data.email, data.password);
-  return user;
-}
-
-export function loginUser(email: string, password: string): User | null {
-  // Check registered users first
-  const users = getStore<SignupData>("registeredUsers");
-  const registered = users.find(u => u.email === email);
-
-  if (registered) {
-    if (registered.password !== password) return null;
-    const roomStudents = getRoomStudents();
-    const roomEntry = roomStudents.find(s => s.email === email);
-    const user: User = {
-      email: registered.email,
-      name: registered.name,
-      role: registered.role,
-      room: roomEntry?.roomNumber,
-      phone: registered.phone || "+91 9876543210",
-      age: registered.age,
-      address: registered.address,
-      year: registered.year,
-      department: registered.department,
-      branch: registered.branch,
-      gender: registered.gender,
-    };
-    sessionStorage.setItem("currentUser", JSON.stringify(user));
-    return user;
-  }
-
-  // Fallback: demo-style detection for seeded data
-  let role: UserRole = "Student";
-  let name = "John Doe";
-  if (email.includes("admin")) { role = "Admin"; name = "Admin User"; }
-  else if (email.includes("staff") || email.includes("warden")) { role = "Warden"; name = "Warden"; }
-
-  const roomStudents = getRoomStudents();
-  const roomEntry = roomStudents.find(s => s.email === email);
-
-  const user: User = { email, name, role, room: roomEntry?.roomNumber || (role === "Student" ? "101" : undefined), phone: "+91 9876543210" };
-  sessionStorage.setItem("currentUser", JSON.stringify(user));
-  return user;
-}
-
-export function getCurrentUser(): User | null {
+export async function addComplaint(
+  complaint: Omit<Complaint, "id" | "createdAt" | "status">
+): Promise<Complaint | null> {
   try {
-    const data = sessionStorage.getItem("currentUser");
-    return data ? JSON.parse(data) : null;
-  } catch { return null; }
-}
+    const result = await postJson<any>("/api/complaints", {
+      title: complaint.title,
+      description: complaint.description,
+      category: complaint.category,
+      priority: complaint.priority,
+      roomNumber: complaint.roomNumber,
+    }, true);
 
-export function logoutUser(): void {
-  sessionStorage.removeItem("currentUser");
-}
-
-// Update user profile
-export function updateUserProfile(email: string, updates: Partial<User>): User | null {
-  // Update in registeredUsers
-  const users = getStore<SignupData>("registeredUsers");
-  const idx = users.findIndex(u => u.email === email);
-  if (idx !== -1) {
-    Object.assign(users[idx], updates);
-    setStore("registeredUsers", users);
+    const user = getCurrentUser();
+    return {
+      id: String(result.id),
+      title: result.title,
+      description: complaint.description,
+      category: complaint.category,
+      priority: complaint.priority,
+      status: "Pending",
+      createdBy: user?.email || "",
+      createdByName: user?.name || "",
+      roomNumber: complaint.roomNumber,
+      createdAt: new Date().toISOString().split("T")[0],
+    };
+  } catch (error) {
+    console.error("Failed to add complaint:", error);
+    return null;
   }
+}
 
-  // Update current session
-  const current = getCurrentUser();
-  if (current && current.email === email) {
-    const updated = { ...current, ...updates };
-    sessionStorage.setItem("currentUser", JSON.stringify(updated));
-    return updated;
+export async function updateComplaintStatus(id: string, status: Complaint["status"]): Promise<void> {
+  try {
+    await putJson(`/api/complaints/${id}`, { status });
+  } catch (error) {
+    console.error("Failed to update complaint:", error);
   }
-  return current;
-}
-
-// Complaints
-export function getComplaints(userEmail?: string): Complaint[] {
-  const all = getStore<Complaint>("complaints");
-  return userEmail ? all.filter(c => c.createdBy === userEmail) : all;
-}
-
-export function addComplaint(complaint: Omit<Complaint, "id" | "createdAt" | "status">): Complaint {
-  const complaints = getStore<Complaint>("complaints");
-  const newComplaint: Complaint = { ...complaint, id: "c" + Date.now(), status: "Pending", createdAt: new Date().toISOString().split("T")[0] };
-  complaints.unshift(newComplaint);
-  setStore("complaints", complaints);
-  return newComplaint;
-}
-
-export function updateComplaintStatus(id: string, status: Complaint["status"]): void {
-  const complaints = getStore<Complaint>("complaints");
-  const idx = complaints.findIndex(c => c.id === id);
-  if (idx !== -1) { complaints[idx].status = status; setStore("complaints", complaints); }
 }
 
 // Attendance
-export function getAttendance(studentEmail?: string): AttendanceRecord[] {
-  const all = getStore<AttendanceRecord>("attendance");
-  return studentEmail ? all.filter(a => a.studentEmail === studentEmail) : all;
-}
-
-export function getAttendancePercentage(studentEmail: string): number {
-  const records = getAttendance(studentEmail);
-  if (!records.length) return 0;
-  const present = records.filter(r => r.status === "Present" || r.status === "Late").length;
-  return Math.round((present / records.length) * 100);
-}
-
-export function markAttendance(record: Omit<AttendanceRecord, "id">): void {
-  const records = getStore<AttendanceRecord>("attendance");
-  // Prevent duplicate for same student + date
-  const exists = records.find(r => r.studentEmail === record.studentEmail && r.date === record.date);
-  if (exists) {
-    exists.status = record.status;
-    setStore("attendance", records);
-    return;
+export async function getAttendance(studentEmail?: string): Promise<AttendanceRecord[]> {
+  try {
+    const result = await fetchJson<any[]>("/api/attendance");
+    
+    if (studentEmail) {
+      return result.filter(a => a.studentEmail === studentEmail).map(a => ({
+        id: String(a.id),
+        studentEmail: a.studentEmail,
+        studentName: a.studentName,
+        roomNumber: a.roomNumber,
+        date: a.date,
+        status: a.status,
+        markedBy: a.markedBy,
+      }));
+    }
+    
+    return result.map(a => ({
+      id: String(a.id),
+      studentEmail: a.studentEmail,
+      studentName: a.studentName,
+      roomNumber: a.roomNumber,
+      date: a.date,
+      status: a.status,
+      markedBy: a.markedBy,
+    }));
+  } catch (error) {
+    console.error("Failed to fetch attendance:", error);
+    return [];
   }
-  records.unshift({ ...record, id: "a" + Date.now() + Math.random().toString(36).slice(2, 5) });
-  setStore("attendance", records);
 }
 
-export function markBulkAttendance(records: Omit<AttendanceRecord, "id">[]): void {
-  records.forEach(r => markAttendance(r));
+export async function getAttendancePercentage(userId?: number): Promise<number> {
+  try {
+    if (!userId) return 0;
+    const result = await fetchJson<{ percentage: number }>(`/api/attendance/percentage/${userId}`);
+    return result.percentage;
+  } catch (error) {
+    console.error("Failed to fetch attendance percentage:", error);
+    return 0;
+  }
+}
+
+export async function markAttendance(record: Omit<AttendanceRecord, "id">): Promise<void> {
+  try {
+    const user = getCurrentUser();
+    if (!user?.id) return;
+    
+    await postJson(
+      "/api/attendance",
+      {
+        studentId: user.id,
+        date: record.date,
+        status: record.status,
+      },
+      true
+    );
+  } catch (error) {
+    console.error("Failed to mark attendance:", error);
+  }
+}
+
+export async function markBulkAttendance(records: Omit<AttendanceRecord, "id">[]): Promise<void> {
+  try {
+    for (const record of records) {
+      await markAttendance(record);
+    }
+  } catch (error) {
+    console.error("Failed to mark bulk attendance:", error);
+  }
 }
 
 // Payments
-export function getPayments(studentEmail?: string): Payment[] {
-  const all = getStore<Payment>("payments");
-  return studentEmail ? all.filter(p => p.studentEmail === studentEmail) : all;
-}
-
-export function markPaymentPaid(id: string): void {
-  const payments = getStore<Payment>("payments");
-  const idx = payments.findIndex(p => p.id === id);
-  if (idx !== -1) { payments[idx].status = "Paid"; payments[idx].paidDate = new Date().toISOString().split("T")[0]; setStore("payments", payments); }
-}
-
-export function updatePaymentFees(studentEmail: string, totalFees: number, pendingFees: number): void {
-  const payments = getStore<Payment>("payments");
-  const studentPayments = payments.filter(p => p.studentEmail === studentEmail);
-  if (studentPayments.length > 0) {
-    studentPayments[0].totalFees = totalFees;
-    studentPayments[0].amount = pendingFees;
-    if (pendingFees <= 0) {
-      studentPayments[0].status = "Paid";
-    } else {
-      studentPayments[0].status = "Unpaid";
+export async function getPayments(studentEmail?: string): Promise<Payment[]> {
+  try {
+    const result = await fetchJson<any[]>("/api/payments");
+    
+    if (studentEmail) {
+      return result.filter(p => p.studentEmail === studentEmail).map(p => ({
+        id: String(p.id),
+        studentEmail: p.studentEmail,
+        studentName: p.studentName,
+        roomNumber: p.roomNumber,
+        description: p.description,
+        amount: p.amount,
+        totalFees: p.totalFees,
+        dueDate: p.dueDate,
+        status: p.status,
+        paidDate: p.paidDate,
+      }));
     }
-    setStore("payments", payments);
+    
+    return result.map(p => ({
+      id: String(p.id),
+      studentEmail: p.studentEmail,
+      studentName: p.studentName,
+      roomNumber: p.roomNumber,
+      description: p.description,
+      amount: p.amount,
+      totalFees: p.totalFees,
+      dueDate: p.dueDate,
+      status: p.status,
+      paidDate: p.paidDate,
+    }));
+  } catch (error) {
+    console.error("Failed to fetch payments:", error);
+    return [];
+  }
+}
+
+export async function markPaymentPaid(id: string): Promise<void> {
+  try {
+    await putJson(`/api/payments/${id}`, { status: "Paid" });
+  } catch (error) {
+    console.error("Failed to mark payment as paid:", error);
+  }
+}
+
+export async function updatePaymentFees(
+  studentEmail: string,
+  totalFees: number,
+  pendingFees: number
+): Promise<void> {
+  try {
+    const payments = await getPayments(studentEmail);
+    if (payments.length > 0) {
+      await putJson(`/api/payments/${payments[0].id}`, {
+        totalFees,
+        amount: pendingFees,
+        status: pendingFees <= 0 ? "Paid" : "Unpaid",
+      });
+    }
+  } catch (error) {
+    console.error("Failed to update payment fees:", error);
+  }
+}
+
+// Students
+export async function getStudents(): Promise<Student[]> {
+  try {
+    const result = await getJson<any[]>("/api/admin/students");
+    return result.map(s => ({
+      id: s.id,
+      name: s.name,
+      email: s.email,
+      phone: s.phone,
+      department: s.department,
+      year: s.year,
+      room_number: s.room_number,
+      status: s.status,
+    }));
+  } catch (error) {
+    console.error("Failed to fetch students:", error);
+    return [];
+  }
+}
+
+export async function createStudent(student: Omit<Student, "id">): Promise<Student | null> {
+  try {
+    const result = await postJson<any>("/api/admin/students", student, true);
+    return {
+      id: result.id,
+      name: result.name,
+      email: result.email,
+      phone: student.phone,
+      department: student.department,
+      year: student.year,
+      room_number: student.room_number,
+      status: student.status,
+    };
+  } catch (error) {
+    console.error("Failed to create student:", error);
+    return null;
+  }
+}
+
+export async function updateStudent(id: number, updates: Partial<Student>): Promise<void> {
+  try {
+    await putJson(`/api/admin/students/${id}`, updates);
+  } catch (error) {
+    console.error("Failed to update student:", error);
+  }
+}
+
+export async function deleteStudent(id: number): Promise<void> {
+  try {
+    await fetchJson(`/api/admin/students/${id}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+  } catch (error) {
+    console.error("Failed to delete student:", error);
+  }
+}
+
+// Staff
+export async function getStaff(): Promise<Staff[]> {
+  try {
+    const result = await getJson<any[]>("/api/admin/staff");
+    return result.map(s => ({
+      id: s.id,
+      name: s.name,
+      role_type: s.role_type,
+      phone: s.phone,
+      salary: s.salary,
+    }));
+  } catch (error) {
+    console.error("Failed to fetch staff:", error);
+    return [];
+  }
+}
+
+export async function getStaffContacts(): Promise<StaffContact[]> {
+  try {
+    const result = await getJson<any[]>("/api/staff-contacts");
+    return result.map(s => ({
+      name: s.name,
+      role: s.role,
+      phone: s.phone,
+    }));
+  } catch (error) {
+    console.error("Failed to fetch staff contacts:", error);
+    return [];
+  }
+}
+
+export async function createStaff(staff: Omit<Staff, "id"> & { email: string }): Promise<Staff | null> {
+  try {
+    const result = await postJson<any>("/api/admin/staff", staff, true);
+    return {
+      id: result.id,
+      name: result.name,
+      role_type: staff.role_type,
+      phone: staff.phone,
+      salary: staff.salary,
+    };
+  } catch (error) {
+    console.error("Failed to create staff:", error);
+    return null;
+  }
+}
+
+export async function updateStaff(id: number, updates: Partial<Staff>): Promise<void> {
+  try {
+    await putJson(`/api/admin/staff/${id}`, updates);
+  } catch (error) {
+    console.error("Failed to update staff:", error);
+  }
+}
+
+export async function deleteStaff(id: number): Promise<void> {
+  try {
+    await fetchJson(`/api/admin/staff/${id}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+  } catch (error) {
+    console.error("Failed to delete staff:", error);
+  }
+}
+
+// Salaries
+export async function getSalaries(): Promise<Salary[]> {
+  try {
+    const result = await fetchJson<any[]>("/api/salaries");
+    return result.map(s => ({
+      id: String(s.id),
+      staffId: s.staffId,
+      roleType: s.roleType,
+      staffName: s.staffName,
+      monthYear: s.monthYear,
+      amount: s.amount,
+      status: s.status,
+      paidDate: s.paidDate,
+    }));
+  } catch (error) {
+    console.error("Failed to fetch salaries:", error);
+    return [];
+  }
+}
+
+export async function getWardenSalary(): Promise<Salary[]> {
+  try {
+    const result = await getJson<any[]>("/api/warden/salary");
+    return result.map(s => ({
+      id: String(s.id),
+      staffId: s.user_id ?? 0,
+      roleType: s.roleType ?? "Warden",
+      staffName: s.staffName ?? "",
+      monthYear: `${s.month}-${s.year}`,
+      amount: s.amount,
+      status: s.status,
+      paidDate: s.paid_date || s.paidDate || undefined,
+    }));
+  } catch (error) {
+    console.error("Failed to fetch warden salary:", error);
+    return [];
+  }
+}
+
+export async function createSalary(salary: Omit<Salary, "id">): Promise<Salary | null> {
+  try {
+    const result = await postJson<any>("/api/salaries", {
+      staffId: salary.staffId,
+      monthYear: salary.monthYear,
+      amount: salary.amount,
+    }, true);
+    return {
+      id: String(result.id),
+      staffId: salary.staffId,
+      roleType: salary.roleType,
+      staffName: salary.staffName,
+      monthYear: salary.monthYear,
+      amount: salary.amount,
+      status: "Unpaid",
+    };
+  } catch (error) {
+    console.error("Failed to create salary:", error);
+    return null;
+  }
+}
+
+export async function updateSalaryStatus(id: string, status: Salary["status"]): Promise<void> {
+  try {
+    await putJson(`/api/salaries/${id}`, { status });
+  } catch (error) {
+    console.error("Failed to update salary:", error);
+  }
+}
+
+// Rooms
+export async function getRooms(): Promise<Room[]> {
+  try {
+    const result = await getJson<any[]>("/api/admin/rooms");
+    return result.map(r => ({
+      room_id: r.room_id,
+      room_no: r.room_no,
+      capacity: r.capacity,
+      occupied: r.occupied,
+      status: r.status,
+    }));
+  } catch (error) {
+    console.error("Failed to fetch rooms:", error);
+    return [];
+  }
+}
+
+export async function allocateRoom(userId: number, roomId: number): Promise<void> {
+  try {
+    await postJson("/api/admin/allocate-room", { user_id: userId, room_id: roomId }, true);
+  } catch (error) {
+    console.error("Failed to allocate room:", error);
+  }
+}
+
+export async function deallocateRoom(userId: number): Promise<void> {
+  try {
+    await postJson("/api/admin/deallocate-room", { user_id: userId }, true);
+  } catch (error) {
+    console.error("Failed to deallocate room:", error);
+  }
+}
+
+// Warden Staff
+export async function getWardenStaff(): Promise<WardenStaff[]> {
+  try {
+    const result = await getJson<any[]>("/api/warden/staff");
+    return result.map(s => ({
+      name: s.name,
+      role_type: s.role_type,
+      phone: s.phone,
+    }));
+  } catch (error) {
+    console.error("Failed to fetch warden staff:", error);
+    return [];
   }
 }
 
 // Summary stats
-export function getDashboardStats(user: User) {
-  const complaints = user.role === "Student" ? getComplaints(user.email) : getComplaints();
-  const payments = user.role === "Student" ? getPayments(user.email) : getPayments();
-  const attendance = user.role === "Student" ? getAttendancePercentage(user.email) : 0;
+export async function getDashboardStats(user: User) {
+  try {
+    const complaints = await getComplaints(user.email);
+    const attendance = user.id ? await getAttendancePercentage(user.id) : 0;
 
-  const totalComplaints = complaints.length;
-  const pendingIssues = complaints.filter(c => c.status !== "Resolved").length;
-  const unpaidAmount = payments.filter(p => p.status === "Unpaid" || p.status === "Overdue").reduce((s, p) => s + p.amount, 0);
+    let unpaidAmount = 0;
+    let feeStatus = "Clear";
 
-  return { totalComplaints, pendingIssues, attendancePercent: attendance, unpaidAmount, feeStatus: unpaidAmount > 0 ? "Due" : "Clear" };
+    if (user.role === "student") {
+      const payments = await getPayments(user.email);
+      unpaidAmount = payments
+        .filter(p => p.status === "Unpaid" || p.status === "Overdue")
+        .reduce((s, p) => s + p.amount, 0);
+      feeStatus = unpaidAmount > 0 ? "Due" : "Clear";
+    }
+
+    const totalComplaints = complaints.length;
+    const pendingIssues = complaints.filter(c => c.status !== "Resolved").length;
+
+    return {
+      totalComplaints,
+      pendingIssues,
+      attendancePercent: attendance,
+      unpaidAmount,
+      feeStatus,
+    };
+  } catch (error) {
+    console.error("Failed to fetch dashboard stats:", error);
+    return {
+      totalComplaints: 0,
+      pendingIssues: 0,
+      attendancePercent: 0,
+      unpaidAmount: 0,
+      feeStatus: "Clear",
+    };
+  }
+}
+
+// Rooms
+export interface RoomSummary {
+  totalRooms: number;
+  availableRooms: number;
+  occupiedRooms: number;
+}
+
+export interface RoomWithStatus {
+  room_id: number;
+  room_no: number;
+  capacity: number;
+  occupied: number;
+  status: "available" | "occupied" | "maintenance";
+}
+
+export interface RoomDetail extends RoomWithStatus {
+  students: Array<{
+    id: number;
+    name: string;
+    email: string;
+    allocation_id: number;
+  }>;
+}
+
+export async function getRoomsSummary(): Promise<RoomSummary> {
+  try {
+    const result = await getJson<RoomSummary>("/api/admin/rooms/summary");
+    return result;
+  } catch (error) {
+    console.error("Failed to fetch rooms summary:", error);
+    return {
+      totalRooms: 0,
+      availableRooms: 0,
+      occupiedRooms: 0,
+    };
+  }
+}
+
+export async function getAllRooms(): Promise<RoomWithStatus[]> {
+  try {
+    const result = await getJson<RoomWithStatus[]>("/api/admin/rooms");
+    return result;
+  } catch (error) {
+    console.error("Failed to fetch rooms:", error);
+    return [];
+  }
+}
+
+export async function getRoomDetails(roomId: number): Promise<RoomDetail | null> {
+  try {
+    const result = await getJson<RoomDetail>(`/api/admin/rooms/${roomId}`);
+    return result;
+  } catch (error) {
+    console.error("Failed to fetch room details:", error);
+    return null;
+  }
+}
+
+export interface Student {
+  id: number;
+  name: string;
+  email: string;
+}
+
+export async function createRoom(roomNo: number, capacity: number, hostelId?: number): Promise<boolean> {
+  try {
+    await postJson("/api/admin/rooms", {
+      room_no: roomNo,
+      capacity,
+      hostel_id: hostelId || 1,
+    }, true);
+    return true;
+  } catch (error) {
+    console.error("Failed to create room:", error);
+    return false;
+  }
+}
+
+export async function getAvailableStudents(): Promise<Student[]> {
+  try {
+    const result = await getJson<Student[]>("/api/admin/available-students");
+    return result;
+  } catch (error) {
+    console.error("Failed to fetch available students:", error);
+    return [];
+  }
+}
+
+export async function allocateStudent(userId: number, roomId: number): Promise<boolean> {
+  try {
+    await postJson("/api/admin/allocations", {
+      user_id: userId,
+      room_id: roomId,
+    }, true);
+    return true;
+  } catch (error) {
+    console.error("Failed to allocate student:", error);
+    return false;
+  }
+}
+
+export async function removeStudentAllocation(allocationId: number): Promise<boolean> {
+  try {
+    await putJson(`/api/admin/allocations/${allocationId}/remove`, {});
+    return true;
+  } catch (error) {
+    console.error("Failed to remove student allocation:", error);
+    return false;
+  }
+}
+
+// Admin dashboard stats
+export async function getAdminDashboardStats(): Promise<{
+  totalStudents: number;
+  totalRooms: number;
+  occupiedRooms: number;
+  availableRooms: number;
+  totalWardens: number;
+  pendingComplaints: number;
+  pendingPayments: number;
+}> {
+  try {
+    const result = await getJson<{
+      totalStudents: number;
+      totalRooms: number;
+      occupiedRooms: number;
+      availableRooms: number;
+      totalWardens: number;
+      pendingComplaints: number;
+      pendingPayments: number;
+    }>("/api/admin/dashboard/stats");
+    return result;
+  } catch (error) {
+    console.error("Failed to fetch admin dashboard stats:", error);
+    return {
+      totalStudents: 0,
+      totalRooms: 0,
+      occupiedRooms: 0,
+      availableRooms: 0,
+      totalWardens: 0,
+      pendingComplaints: 0,
+      pendingPayments: 0,
+    };
+  }
 }

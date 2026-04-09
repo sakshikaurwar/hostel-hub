@@ -1,13 +1,12 @@
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { getCurrentUser, logoutUser } from "@/lib/dataService";
-import { LayoutDashboard, MessageSquare, CalendarCheck, CreditCard, User, LogOut, Menu, X } from "lucide-react";
+import { LayoutDashboard, MessageSquare, CalendarCheck, CreditCard, User, LogOut, Menu, X, DollarSign, Home } from "lucide-react";
 
-const navItems = [
+const baseNavItems = [
   { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
   { label: "Complaints", path: "/complaints", icon: MessageSquare },
   { label: "Attendance", path: "/attendance", icon: CalendarCheck },
-  { label: "Payments", path: "/payments", icon: CreditCard },
   { label: "Profile", path: "/profile", icon: User },
 ];
 
@@ -16,6 +15,25 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const location = useLocation();
   const user = getCurrentUser();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const navItems = user?.role === "admin"
+    ? [
+        ...baseNavItems,
+        { label: "Payments", path: "/payments", icon: CreditCard },
+        { label: "Students", path: "/admin/students", icon: User },
+        { label: "Staff Info", path: "/admin/staff", icon: User },
+        { label: "Salaries", path: "/admin/salaries", icon: DollarSign },
+        { label: "Rooms", path: "/admin/rooms", icon: LayoutDashboard },
+      ]
+    : user?.role === "warden"
+    ? [
+        ...baseNavItems,
+        { label: "Staff Contacts", path: "/warden/staff-contacts", icon: User },
+        { label: "Salary", path: "/warden/salary", icon: DollarSign },
+      ]
+    : [
+        ...baseNavItems,
+        { label: "Payments", path: "/payments", icon: CreditCard },
+      ];
 
   if (!user) { navigate("/"); return null; }
 

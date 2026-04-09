@@ -1,22 +1,31 @@
 import { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import DashboardLayout from "@/components/DashboardLayout";
 import { getCurrentUser, getPayments, markPaymentPaid, updatePaymentFees, type Payment } from "@/lib/dataService";
 import { Pencil, Check, X } from "lucide-react";
 
 export default function Payments() {
+  const navigate = useNavigate();
   const user = getCurrentUser();
   const [payments, setPayments] = useState<Payment[]>([]);
   const [editingEmail, setEditingEmail] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ totalFees: 0, pendingFees: 0 });
 
-  const refresh = () => {
-    setPayments(user?.role === "Student" ? getPayments(user.email) : getPayments());
+  const refresh = async () => {
+    const data = user?.email ? await getPayments(user.email) : await getPayments();
+    setPayments(data);
   };
 
-  useEffect(refresh, []);
+  useEffect(() => {
+    if (user?.role === "warden") {
+      navigate("/dashboard");
+      return;
+    }
+    refresh();
+  }, [user, navigate]);
 
-  const isStudent = user?.role === "Student";
-  const isAdmin = user?.role === "Admin";
+  const isStudent = user?.role === "student";
+  const isAdminOrWarden = user?.role === "admin" || user?.role === "warden";
   const totalDue = payments.filter(p => p.status !== "Paid").reduce((s, p) => s + p.amount, 0);
   const totalPaid = payments.filter(p => p.status === "Paid").reduce((s, p) => s + p.amount, 0);
 
@@ -97,7 +106,7 @@ export default function Payments() {
       {!isStudent && (
         <div className="bg-card rounded-lg border overflow-x-auto">
           <table className="data-table">
-            <thead><tr><th>Student Name</th><th>Room Number</th><th>Total Fees</th><th>Pending Fees</th>{isAdmin && <th>Action</th>}</tr></thead>
+            <thead><tr><th>Student Name</th><th>Room Number</th><th>Total Fees</th><th>Pending Fees</th>{isAdminOrWarden && <th>Action</th>}</tr></thead>
             <tbody>
               {studentSummary.map((s, i) => (
                 <tr key={i}>
@@ -119,7 +128,7 @@ export default function Payments() {
                       </span>
                     )}
                   </td>
-                  {isAdmin && (
+                  {isAdminOrWarden && (
                     <td>
                       {editingEmail === s.studentEmail ? (
                         <div className="flex gap-1">
@@ -133,7 +142,7 @@ export default function Payments() {
                   )}
                 </tr>
               ))}
-              {!studentSummary.length && <tr><td colSpan={isAdmin ? 5 : 4} className="text-center py-8 text-muted-foreground">No payment records found</td></tr>}
+              {!studentSummary.length && <tr><td colSpan={isAdminOrWarden ? 5 : 4} className="text-center py-8 text-muted-foreground">No payment records found</td></tr>}
             </tbody>
           </table>
         </div>

@@ -24,10 +24,16 @@ export default function Attendance() {
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
 
   useEffect(() => {
-    const data = user?.role === "Student" ? getAttendance(user.email) : getAttendance();
-    setRecords(data);
-    if (user?.role === "Student") setPercentage(getAttendancePercentage(user.email));
-  }, []);
+    const loadData = async () => {
+      const data = user?.email ? await getAttendance(user.email) : await getAttendance();
+      setRecords(data);
+      if (user?.id && user?.role === "student") {
+        const percent = await getAttendancePercentage(user.id);
+        setPercentage(percent);
+      }
+    };
+    loadData();
+  }, [user]);
 
   const attendanceMap = useMemo(() => {
     const map: Record<string, "Present" | "Absent" | "Late"> = {};
@@ -37,7 +43,7 @@ export default function Attendance() {
 
   const daysInMonth = getDaysInMonth(currentYear, currentMonth);
   const firstDay = new Date(currentYear, currentMonth, 1).getDay();
-  const isStudent = user?.role === "Student";
+  const isStudent = user?.role === "student";
 
   const prevMonth = () => {
     if (currentMonth === 0) { setCurrentMonth(11); setCurrentYear(y => y - 1); }

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import DashboardLayout from "@/components/DashboardLayout";
-import { getCurrentUser, getAttendance, markBulkAttendance, getRoomNumbers, getStudentsByRoom, type AttendanceRecord } from "@/lib/dataService";
+import { getCurrentUser, getAttendance, markBulkAttendance, getStudents, type AttendanceRecord } from "@/lib/dataService";
 import { ArrowLeft, Check } from "lucide-react";
 
 export default function MarkAttendance() {
@@ -13,36 +13,50 @@ export default function MarkAttendance() {
   const [checkedStudents, setCheckedStudents] = useState<Record<string, boolean>>({});
   const [markingSuccess, setMarkingSuccess] = useState(false);
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const [students, setStudents] = useState<any[]>([]);
 
-  const roomNumbers = getRoomNumbers();
-
-  const studentsForDate = useMemo(() => {
-    const result: { roomNumber: string; students: { email: string; name: string }[] }[] = [];
-    roomNumbers.forEach(room => {
-      const students = getStudentsByRoom(room);
-      result.push({ roomNumber: room, students: students.map(s => ({ email: s.email, name: s.name })) });
+  const studentsByRoom = useMemo(() => {
+    const result: { roomNumber: string; students: { id: number; email: string; name: string }[] }[] = [];
+    const roomMap: Record<string, { id: number; email: string; name: string }[]> = {};
+    
+    students.forEach(student => {
+      const room = student.room_number || "Unassigned";
+      if (!roomMap[room]) roomMap[room] = [];
+      roomMap[room].push({ id: student.id, email: student.email, name: student.name });
     });
+    
+    Object.keys(roomMap).sort().forEach(room => {
+      result.push({ roomNumber: room, students: roomMap[room] });
+    });
+    
     return result;
-  }, [roomNumbers]);
+  }, [students]);
 
   useEffect(() => {
-    if (!selectedDate) return;
-    const data = getAttendance();
-    setRecords(data);
-    const existing = data.filter(r => r.date === selectedDate);
-    const checked: Record<string, boolean> = {};
-    existing.forEach(r => {
-      if (r.status === "Present" || r.status === "Late") checked[r.studentEmail] = true;
-    });
-    setCheckedStudents(checked);
+    const loadData = async () => {
+      const studentsData = await getStudents();
+      setStudents(studentsData);
+      
+      if (selectedDate) {
+        const attendanceData = await getAttendance();
+        setRecords(attendanceData);
+        const existing = attendanceData.filter((r: AttendanceRecord) => r.date === selectedDate);
+        const checked: Record<string, boolean> = {};
+        existing.forEach((r: AttendanceRecord) => {
+          if (r.status === "Present" || r.status === "Late") checked[r.studentEmail] = true;
+        });
+        setCheckedStudents(checked);
+      }
+    };
+    loadData();
   }, [selectedDate]);
 
   const handleMarkAttendance = () => {
     if (!selectedDate || !user) return;
-    const allStudentEmails: { email: string; name: string; roomNumber: string }[] = [];
-    studentsForDate.forEach(room => {
+    const allStudentEmails: { id: number; email: string; name: string; roomNumber: string }[] = [];
+    studentsByRoom.forEach(room => {
       room.students.forEach(s => {
-        allStudentEmails.push({ email: s.email, name: s.name, roomNumber: room.roomNumber });
+        allStudentEmails.push({ id: s.id, email: s.email, name: s.name, roomNumber: room.roomNumber });
       });
     });
 
@@ -84,7 +98,7 @@ export default function MarkAttendance() {
         )}
 
         <div className="space-y-4">
-          {studentsForDate.map(room => (
+          {studentsByRoom.map(room => (
             <div key={room.roomNumber} className="border rounded-md p-4">
               <h4 className="font-medium text-sm mb-3 text-muted-foreground">Room {room.roomNumber}</h4>
               <div className="space-y-2">

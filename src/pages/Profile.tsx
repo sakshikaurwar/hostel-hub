@@ -17,7 +17,7 @@ export default function Profile() {
     gender: user?.gender || "",
   });
 
-  const isStudent = user?.role === "Student";
+  const isStudent = user?.role === "student";
 
   const handleSave = () => {
     if (!user) return;
@@ -61,14 +61,14 @@ export default function Profile() {
     { label: "Gender", key: "gender" },
   ];
 
-  const staffAdminFields: { label: string; key: string; readonly?: boolean }[] = [
+  const wardenAdminFields: { label: string; key: string; readonly?: boolean }[] = [
     { label: "Name", key: "name" },
     { label: "Age", key: "age" },
     { label: "Role", key: "role", readonly: true },
     { label: "Phone Number", key: "phone" },
   ];
 
-  const fields: { label: string; key: string; readonly?: boolean }[] = isStudent ? studentFields : staffAdminFields;
+  const fields: { label: string; key: string; readonly?: boolean }[] = isStudent ? studentFields : wardenAdminFields;
 
   const getDisplayValue = (key: string) => {
     if (key === "role") return user?.role || "N/A";

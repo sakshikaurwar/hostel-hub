@@ -9,35 +9,39 @@ export default function Login() {
   const [name, setName] = useState("");
   const [age, setAge] = useState("");
   const [phone, setPhone] = useState("");
-  const [role, setRole] = useState<UserRole>("Student");
+  const [role, setRole] = useState<UserRole>("student");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const navigate = useNavigate();
 
-  const handleSignIn = (e: React.FormEvent) => {
+  const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(""); setSuccess("");
     if (!email.trim() || !password.trim()) { setError("Please fill in all fields"); return; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setError("Please enter a valid email"); return; }
-    if (password.length < 4) { setError("Password must be at least 4 characters"); return; }
+    if (password.length < 8) { setError("Password must be at least 8 characters"); return; }
 
-    const user = loginUser(email, password);
-    if (user) navigate("/dashboard");
-    else setError("Invalid email or password");
+    const result = await loginUser(email, password);
+    if (result.success) {
+      navigate("/dashboard");
+    } else {
+      setError(result.message);
+    }
   };
 
-  const handleSignUp = (e: React.FormEvent) => {
+  const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(""); setSuccess("");
     if (!name.trim() || !email.trim() || !password.trim()) { setError("Please fill in all fields"); return; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setError("Please enter a valid email"); return; }
-    if (password.length < 4) { setError("Password must be at least 4 characters"); return; }
+    if (password.length < 8) { setError("Password must be at least 8 characters"); return; }
 
-    const user = signupUser({ email, password, name, role, age: age ? parseInt(age) : undefined, phone: phone || undefined });
-    if (user) {
+    const result = await signupUser({ email, password, name, role, age: age ? parseInt(age) : undefined, phone: phone || undefined });
+    console.log(result);
+    if (result.success) {
       navigate("/dashboard");
     } else {
-      setError("An account with this email already exists");
+      setError(result.message);
     }
   };
 
@@ -101,9 +105,8 @@ export default function Login() {
               <div>
                 <label className="block text-sm font-medium mb-1.5">Role</label>
                 <select value={role} onChange={e => setRole(e.target.value as UserRole)} className="w-full px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring">
-                  <option value="Student">Student</option>
-                  <option value="Warden">Warden</option>
-                  <option value="Admin">Admin</option>
+                  <option value="student">Student</option>
+                  <option value="warden">Warden</option>
                 </select>
               </div>
               <button type="submit" className="w-full py-2.5 rounded-md bg-primary text-primary-foreground font-medium text-sm hover:opacity-90 transition-opacity">Create Account</button>
