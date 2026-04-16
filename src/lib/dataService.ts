@@ -7,7 +7,8 @@ export interface User {
   email: string;
   name: string;
   role: UserRole;
-  room?: string;
+  room?: string;        // Display alias (may come from sessionStorage login data)
+  room_number?: string; // From backend /api/auth/me
   phone?: string;
   age?: number;
   address?: string;
@@ -15,6 +16,7 @@ export interface User {
   department?: string;
   branch?: string;
   gender?: string;
+  status?: string;
 }
 
 export interface SignupData {
@@ -46,9 +48,12 @@ export interface Complaint {
 
 export interface AttendanceRecord {
   id: string;
+  studentId: number;
   studentEmail: string;
   studentName: string;
   roomNumber: string;
+  department?: string;
+  branch?: string;
   date: string;
   status: "Present" | "Absent" | "Late";
   markedBy: string;
@@ -73,6 +78,7 @@ export interface Student {
   email: string;
   phone?: string;
   department?: string;
+  branch?: string;
   year?: string;
   room_number?: string;
   status: 'active' | 'inactive';
@@ -83,7 +89,6 @@ export interface Staff {
   name: string;
   role_type: 'Warden' | 'Cleaner' | 'Electrician' | 'Security';
   phone?: string;
-  salary?: number;
 }
 
 export interface WardenStaff {
@@ -96,17 +101,6 @@ export interface StaffContact {
   name: string;
   role: string;
   phone?: string;
-}
-
-export interface Salary {
-  id: string;
-  staffId: number;
-  roleType: string;
-  staffName: string;
-  monthYear: string;
-  amount: number;
-  status: "Paid" | "Unpaid";
-  paidDate?: string;
 }
 
 export interface RoomStudent {
@@ -146,7 +140,20 @@ export function seedData() {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 const TOKEN_KEY = "authToken";
-const USER_KEY = "currentUser";
+
+// Simple JWT decoder to extract role and id from the token payload
+function parseJwt(token: string) {
+  try {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
+        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+    }).join(''));
+    return JSON.parse(jsonPayload);
+  } catch (e) {
+    return null;
+  }
+}
 
 interface AuthLoginResponse {
   message: string;
@@ -176,19 +183,6 @@ function setAuthToken(token: string): void {
 
 function removeAuthToken(): void {
   sessionStorage.removeItem(TOKEN_KEY);
-}
-
-function getUserStorage(): User | null {
-  try {
-    const data = sessionStorage.getItem(USER_KEY);
-    return data ? (JSON.parse(data) as User) : null;
-  } catch {
-    return null;
-  }
-}
-
-function setUserStorage(user: User): void {
-  sessionStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
 function authHeaders(): Record<string, string> {
@@ -235,10 +229,16 @@ async function putJson<T>(endpoint: string, body: unknown): Promise<T> {
 }
 
 export async function getJson<T>(endpoint: string): Promise<T> {
-  const headers = authHeaders();
+  const headers: Record<string, string> = {
+    ...authHeaders(),
+    // Disable browser caching so we always get fresh data from backend
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+  };
   return fetchJson<T>(endpoint, {
     method: "GET",
     headers,
+    cache: "no-store",
   });
 }
 
@@ -270,7 +270,6 @@ export async function signupUser(data: SignupData): Promise<{ success: boolean; 
       branch: data.branch,
       gender: data.gender,
     };
-    setUserStorage(user);
     setAuthToken(result.token);
     return { success: true, message: result.message, user };
   } catch (error) {
@@ -290,7 +289,6 @@ export async function loginUser(
       name: result.name,
       role: result.role,
     };
-    setUserStorage(user);
     setAuthToken(result.token);
     return { success: true, user };
   } catch (error) {
@@ -301,51 +299,96 @@ export async function loginUser(
 export function getCurrentUser(): User | null {
   const token = getAuthToken();
   if (!token) return null;
-  return getUserStorage();
+  const decoded = parseJwt(token);
+  if (!decoded) return null;
+  return {
+    id: decoded.user_id,
+    role: decoded.role,
+    email: "", // Not in token, will be fetched by fetchCurrentUser
+    name: "",  // Not in token, will be fetched by fetchCurrentUser
+  };
 }
 
 export function logoutUser(): void {
   removeAuthToken();
-  sessionStorage.removeItem(USER_KEY);
 }
 
-// Update user profile
+// Fetch fresh user profile from backend (includes room_number)
+export async function fetchCurrentUser(): Promise<User | null> {
+  try {
+    const result = await getJson<any>("/api/auth/me");
+    const user: User = {
+      id: result.id,
+      email: result.email,
+      name: result.name,
+      role: result.role,
+      phone: result.phone || "",
+      age: result.age,
+      address: result.address || "",
+      year: result.year || "",
+      department: result.department || "",
+      branch: result.branch || "",
+      gender: result.gender || "",
+      room_number: result.room_number || "",
+      room: result.room_number || "",   // alias for compatibility
+      status: result.status || "inactive",
+    };
+    // Return the fresh data directly
+    console.log("[Auth] Fetched fresh user profile from /api/auth/me:", user.name);
+    return user;
+  } catch (error) {
+    console.error("[Auth] Failed to fetch current user from backend:", error);
+    return null;
+  }
+}
+
+// Update user profile in backend then refresh local storage
 export async function updateUserProfile(email: string, updates: Partial<User>): Promise<User | null> {
   try {
     const current = getCurrentUser();
+    if (!current || current.email !== email) return current;
+    
+    // Persist to backend
+    const result = await putJson<{ message: string; user: any }>("/api/auth/profile", {
+      name: updates.name,
+      phone: updates.phone,
+      age: updates.age,
+      address: updates.address,
+      year: updates.year,
+      department: updates.department,
+      branch: updates.branch,
+      gender: updates.gender,
+    });
+    
+    // Build updated user from backend response
+    const updated: User = {
+      ...current,
+      ...result.user,
+      room: result.user.room_number || current.room_number || "",
+    };
+    console.log("[Profile] Updated profile in backend:", updated.name);
+    return updated;
+  } catch (error) {
+    console.error("[Profile] Failed to update user profile:", error);
+    // Fallback to local update only
+    const current = getCurrentUser();
     if (current && current.email === email) {
       const updated = { ...current, ...updates };
-      setUserStorage(updated);
       return updated;
     }
-    return current;
-  } catch (error) {
-    console.error("Failed to update user profile:", error);
     return null;
   }
 }
 
 // Complaints
+// NOTE: Backend already filters by user role — admin/warden see all, student sees own.
+// The userEmail param is kept for API compatibility but filtering is handled server-side.
 export async function getComplaints(userEmail?: string): Promise<Complaint[]> {
   try {
-    const result = await fetchJson<any[]>("/api/complaints");
+    const result = await getJson<any[]>("/api/complaints");
+    console.log("[Complaints] Fetched from API:", result.length, "records");
     
-    if (userEmail) {
-      return result.filter(c => c.createdBy === userEmail).map(c => ({
-        id: String(c.id),
-        title: c.title,
-        description: c.description,
-        category: c.category,
-        priority: c.priority,
-        status: c.status,
-        createdBy: c.createdBy,
-        createdByName: c.createdByName,
-        roomNumber: c.roomNumber,
-        createdAt: c.createdAt,
-      }));
-    }
-    
-    return result.map(c => ({
+    const mapped = result.map(c => ({
       id: String(c.id),
       title: c.title,
       description: c.description,
@@ -357,15 +400,17 @@ export async function getComplaints(userEmail?: string): Promise<Complaint[]> {
       roomNumber: c.roomNumber,
       createdAt: c.createdAt,
     }));
+    
+    return mapped;
   } catch (error) {
-    console.error("Failed to fetch complaints:", error);
+    console.error("[Complaints] Failed to fetch:", error);
     return [];
   }
 }
 
 export async function addComplaint(
   complaint: Omit<Complaint, "id" | "createdAt" | "status">
-): Promise<Complaint | null> {
+): Promise<Complaint> {
   try {
     const result = await postJson<any>("/api/complaints", {
       title: complaint.title,
@@ -388,9 +433,9 @@ export async function addComplaint(
       roomNumber: complaint.roomNumber,
       createdAt: new Date().toISOString().split("T")[0],
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Failed to add complaint:", error);
-    return null;
+    throw new Error(error.message || "Failed to add complaint");
   }
 }
 
@@ -403,36 +448,58 @@ export async function updateComplaintStatus(id: string, status: Complaint["statu
 }
 
 // Attendance
+// NOTE: Backend already filters by role — students see only their own records.
+// The studentEmail param is kept for API compatibility but is no longer used for client-side filtering.
 export async function getAttendance(studentEmail?: string): Promise<AttendanceRecord[]> {
   try {
-    const result = await fetchJson<any[]>("/api/attendance");
-    
-    if (studentEmail) {
-      return result.filter(a => a.studentEmail === studentEmail).map(a => ({
-        id: String(a.id),
-        studentEmail: a.studentEmail,
-        studentName: a.studentName,
-        roomNumber: a.roomNumber,
-        date: a.date,
-        status: a.status,
-        markedBy: a.markedBy,
-      }));
-    }
+    const result = await getJson<any[]>("/api/attendance");
+    console.log("[Attendance] Fetched from API:", result.length, "records");
     
     return result.map(a => ({
       id: String(a.id),
+      studentId: a.studentId,
       studentEmail: a.studentEmail,
       studentName: a.studentName,
       roomNumber: a.roomNumber,
+      department: a.department || "N/A",
+      branch: a.branch || "N/A",
       date: a.date,
       status: a.status,
       markedBy: a.markedBy,
     }));
   } catch (error) {
-    console.error("Failed to fetch attendance:", error);
+    console.error("[Attendance] Failed to fetch:", error);
     return [];
   }
 }
+
+export async function getAttendanceByDate(date: string): Promise<Record<string, AttendanceRecord[]>> {
+  try {
+    const result = await getJson<Record<string, any[]>>(`/api/attendance/date/${date}`);
+    console.log("[Attendance] Fetched records for date:", date);
+    
+    const mapped: Record<string, AttendanceRecord[]> = {};
+    for (const room in result) {
+      mapped[room] = result[room].map(a => ({
+        id: String(a.id),
+        studentId: a.studentId,
+        studentEmail: a.studentEmail,
+        studentName: a.studentName,
+        roomNumber: a.roomNumber,
+        department: a.department || "N/A",
+        branch: a.branch || "N/A",
+        date: a.date,
+        status: a.status,
+        markedBy: a.markedBy || "N/A",
+      }));
+    }
+    return mapped;
+  } catch (error) {
+    console.error("[Attendance] Failed to fetch by date:", error);
+    return {};
+  }
+}
+
 
 export async function getAttendancePercentage(userId?: number): Promise<number> {
   try {
@@ -453,7 +520,7 @@ export async function markAttendance(record: Omit<AttendanceRecord, "id">): Prom
     await postJson(
       "/api/attendance",
       {
-        studentId: user.id,
+        studentId: record.studentId,
         date: record.date,
         status: record.status,
       },
@@ -475,24 +542,12 @@ export async function markBulkAttendance(records: Omit<AttendanceRecord, "id">[]
 }
 
 // Payments
+// NOTE: Backend already filters by role — students see only their own, admin sees all.
+// The studentEmail param is kept for API compatibility but filtering is server-side.
 export async function getPayments(studentEmail?: string): Promise<Payment[]> {
   try {
-    const result = await fetchJson<any[]>("/api/payments");
-    
-    if (studentEmail) {
-      return result.filter(p => p.studentEmail === studentEmail).map(p => ({
-        id: String(p.id),
-        studentEmail: p.studentEmail,
-        studentName: p.studentName,
-        roomNumber: p.roomNumber,
-        description: p.description,
-        amount: p.amount,
-        totalFees: p.totalFees,
-        dueDate: p.dueDate,
-        status: p.status,
-        paidDate: p.paidDate,
-      }));
-    }
+    const result = await getJson<any[]>("/api/payments");
+    console.log("[Payments] Fetched from API:", result.length, "records");
     
     return result.map(p => ({
       id: String(p.id),
@@ -507,16 +562,19 @@ export async function getPayments(studentEmail?: string): Promise<Payment[]> {
       paidDate: p.paidDate,
     }));
   } catch (error) {
-    console.error("Failed to fetch payments:", error);
+    console.error("[Payments] Failed to fetch:", error);
     return [];
   }
 }
 
 export async function markPaymentPaid(id: string): Promise<void> {
   try {
+    console.log("[Payments] Marking payment as paid:", id);
     await putJson(`/api/payments/${id}`, { status: "Paid" });
+    console.log("[Payments] Payment marked paid successfully");
   } catch (error) {
-    console.error("Failed to mark payment as paid:", error);
+    console.error("[Payments] Failed to mark payment as paid:", error);
+    throw error;
   }
 }
 
@@ -526,16 +584,27 @@ export async function updatePaymentFees(
   pendingFees: number
 ): Promise<void> {
   try {
-    const payments = await getPayments(studentEmail);
-    if (payments.length > 0) {
-      await putJson(`/api/payments/${payments[0].id}`, {
-        totalFees,
-        amount: pendingFees,
+    // Fetch all payments then filter by student email (admin context)
+    const allPayments = await getPayments();
+    const studentPayments = allPayments.filter(p => p.studentEmail === studentEmail);
+    if (studentPayments.length > 0) {
+      console.log(`[Payments] Updating fees for ${studentEmail}, payment id:`, studentPayments[0].id);
+      await putJson(`/api/payments/${studentPayments[0].id}`, {
         status: pendingFees <= 0 ? "Paid" : "Unpaid",
       });
     }
   } catch (error) {
     console.error("Failed to update payment fees:", error);
+  }
+}
+
+export async function createPayment(paymentData: { studentId: number; description: string; amount: number; totalFees: number; dueDate: string }): Promise<boolean> {
+  try {
+    await postJson("/api/payments", paymentData, true);
+    return true;
+  } catch (error) {
+    console.error("Failed to create payment:", error);
+    return false;
   }
 }
 
@@ -549,6 +618,7 @@ export async function getStudents(): Promise<Student[]> {
       email: s.email,
       phone: s.phone,
       department: s.department,
+      branch: s.branch,
       year: s.year,
       room_number: s.room_number,
       status: s.status,
@@ -606,7 +676,6 @@ export async function getStaff(): Promise<Staff[]> {
       name: s.name,
       role_type: s.role_type,
       phone: s.phone,
-      salary: s.salary,
     }));
   } catch (error) {
     console.error("Failed to fetch staff:", error);
@@ -628,7 +697,7 @@ export async function getStaffContacts(): Promise<StaffContact[]> {
   }
 }
 
-export async function createStaff(staff: Omit<Staff, "id"> & { email: string }): Promise<Staff | null> {
+export async function createStaff(staff: Omit<Staff, "id"> & { email: string }): Promise<Staff> {
   try {
     const result = await postJson<any>("/api/admin/staff", staff, true);
     return {
@@ -636,11 +705,10 @@ export async function createStaff(staff: Omit<Staff, "id"> & { email: string }):
       name: result.name,
       role_type: staff.role_type,
       phone: staff.phone,
-      salary: staff.salary,
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Failed to create staff:", error);
-    return null;
+    throw new Error(error.message || "Failed to create staff");
   }
 }
 
@@ -660,75 +728,6 @@ export async function deleteStaff(id: number): Promise<void> {
     });
   } catch (error) {
     console.error("Failed to delete staff:", error);
-  }
-}
-
-// Salaries
-export async function getSalaries(): Promise<Salary[]> {
-  try {
-    const result = await fetchJson<any[]>("/api/salaries");
-    return result.map(s => ({
-      id: String(s.id),
-      staffId: s.staffId,
-      roleType: s.roleType,
-      staffName: s.staffName,
-      monthYear: s.monthYear,
-      amount: s.amount,
-      status: s.status,
-      paidDate: s.paidDate,
-    }));
-  } catch (error) {
-    console.error("Failed to fetch salaries:", error);
-    return [];
-  }
-}
-
-export async function getWardenSalary(): Promise<Salary[]> {
-  try {
-    const result = await getJson<any[]>("/api/warden/salary");
-    return result.map(s => ({
-      id: String(s.id),
-      staffId: s.user_id ?? 0,
-      roleType: s.roleType ?? "Warden",
-      staffName: s.staffName ?? "",
-      monthYear: `${s.month}-${s.year}`,
-      amount: s.amount,
-      status: s.status,
-      paidDate: s.paid_date || s.paidDate || undefined,
-    }));
-  } catch (error) {
-    console.error("Failed to fetch warden salary:", error);
-    return [];
-  }
-}
-
-export async function createSalary(salary: Omit<Salary, "id">): Promise<Salary | null> {
-  try {
-    const result = await postJson<any>("/api/salaries", {
-      staffId: salary.staffId,
-      monthYear: salary.monthYear,
-      amount: salary.amount,
-    }, true);
-    return {
-      id: String(result.id),
-      staffId: salary.staffId,
-      roleType: salary.roleType,
-      staffName: salary.staffName,
-      monthYear: salary.monthYear,
-      amount: salary.amount,
-      status: "Unpaid",
-    };
-  } catch (error) {
-    console.error("Failed to create salary:", error);
-    return null;
-  }
-}
-
-export async function updateSalaryStatus(id: string, status: Salary["status"]): Promise<void> {
-  try {
-    await putJson(`/api/salaries/${id}`, { status });
-  } catch (error) {
-    console.error("Failed to update salary:", error);
   }
 }
 
@@ -891,9 +890,9 @@ export async function createRoom(roomNo: number, capacity: number, hostelId?: nu
       hostel_id: hostelId || 1,
     }, true);
     return true;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Failed to create room:", error);
-    return false;
+    throw new Error(error.message || "Failed to create room");
   }
 }
 
@@ -907,11 +906,12 @@ export async function getAvailableStudents(): Promise<Student[]> {
   }
 }
 
-export async function allocateStudent(userId: number, roomId: number): Promise<boolean> {
+export async function allocateStudent(userId: number, roomId: number, roomFee?: number): Promise<boolean> {
   try {
-    await postJson("/api/admin/allocations", {
+    await postJson("/api/admin/allocate-room", {
       user_id: userId,
       room_id: roomId,
+      room_fee: roomFee || 0,
     }, true);
     return true;
   } catch (error) {
@@ -920,12 +920,12 @@ export async function allocateStudent(userId: number, roomId: number): Promise<b
   }
 }
 
-export async function removeStudentAllocation(allocationId: number): Promise<boolean> {
+export async function removeStudentAllocation(userId: number): Promise<boolean> {
   try {
-    await putJson(`/api/admin/allocations/${allocationId}/remove`, {});
+    await postJson(`/api/admin/deallocate-room`, { user_id: userId }, true);
     return true;
   } catch (error) {
-    console.error("Failed to remove student allocation:", error);
+    console.error("Failed to deallocate student:", error);
     return false;
   }
 }
@@ -939,6 +939,12 @@ export async function getAdminDashboardStats(): Promise<{
   totalWardens: number;
   pendingComplaints: number;
   pendingPayments: number;
+  recentAllocations?: Array<{
+    studentName: string;
+    roomNumber: string;
+    checkIn: string;
+    department: string;
+  }>;
 }> {
   try {
     const result = await getJson<{

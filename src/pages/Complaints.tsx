@@ -11,29 +11,35 @@ export default function Complaints() {
   const [viewDescription, setViewDescription] = useState<string | null>(null);
 
   const refresh = async () => {
-    const data = user?.email ? await getComplaints(user.email) : await getComplaints();
+    const data = await getComplaints();
+    console.log("[Complaints] State updated with", data.length, "records");
     setComplaints(data);
   };
 
   useEffect(() => {
     refresh();
-  }, [user]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, user?.role]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.title.trim() || !form.description.trim()) return;
-    await addComplaint({
-      title: form.title,
-      description: form.description,
-      category: "General",
-      priority: "Medium",
-      createdBy: user?.email || "",
-      createdByName: user?.name || "",
-      roomNumber: user?.room || "N/A",
-    });
-    setForm({ title: "", description: "" });
-    setShowForm(false);
-    await refresh();
+    try {
+      await addComplaint({
+        title: form.title,
+        description: form.description,
+        category: "General",
+        priority: "Medium",
+        createdBy: user?.email || "",
+        createdByName: user?.name || "",
+        roomNumber: user?.room || "N/A",
+      });
+      setForm({ title: "", description: "" });
+      setShowForm(false);
+      await refresh();
+    } catch (err: any) {
+      alert(err.message || "Failed to add complaint");
+    }
   };
 
   const handleStatusChange = async (id: string, status: Complaint["status"]) => {

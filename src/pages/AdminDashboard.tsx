@@ -18,7 +18,7 @@ export default function AdminDashboard() {
       .catch(err => {
         setError(err instanceof Error ? err.message : "Unable to load admin dashboard");
       });
-  }, [user]);
+  }, [user?.id]);
 
   if (!user) {
     return <Navigate to="/" replace />;

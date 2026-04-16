@@ -20,12 +20,14 @@ export default function Students() {
     email: "",
     phone: "",
     department: "",
+    branch: "",
     year: "",
     status: "inactive" as 'active' | 'inactive',
   });
 
   const refresh = async () => {
     const data = await getStudents();
+    console.log("[Students] Fetched", data.length, "students from API");
     setStudents(data);
     setFilteredStudents(data);
   };
@@ -54,7 +56,7 @@ export default function Students() {
       await createStudent(studentData);
     }
 
-    setForm({ name: "", email: "", phone: "", department: "", year: "", status: "inactive" });
+    setForm({ name: "", email: "", phone: "", department: "", branch: "", year: "", status: "inactive" });
     setShowForm(false);
     setEditingStudent(null);
     await refresh();
@@ -67,6 +69,7 @@ export default function Students() {
       email: student.email,
       phone: student.phone || "",
       department: student.department || "",
+      branch: student.branch || "",
       year: student.year || "",
       status: student.status,
     });
@@ -90,7 +93,7 @@ export default function Students() {
           </div>
           <Dialog open={showForm} onOpenChange={setShowForm}>
             <DialogTrigger asChild>
-              <Button onClick={() => { setEditingStudent(null); setForm({ name: "", email: "", phone: "", department: "", year: "", status: "inactive" }); }}>
+              <Button onClick={() => { setEditingStudent(null); setForm({ name: "", email: "", phone: "", department: "", branch: "", year: "", status: "inactive" }); }}>
                 <Plus size={16} className="mr-2" />
                 Add Student
               </Button>
@@ -115,6 +118,10 @@ export default function Students() {
                 <div>
                   <Label htmlFor="department">Department</Label>
                   <Input id="department" value={form.department} onChange={e => setForm({ ...form, department: e.target.value })} />
+                </div>
+                <div>
+                  <Label htmlFor="branch">Branch</Label>
+                  <Input id="branch" value={form.branch} onChange={e => setForm({ ...form, branch: e.target.value })} />
                 </div>
                 <div>
                   <Label htmlFor="year">Year</Label>
@@ -155,7 +162,7 @@ export default function Students() {
                 <TableHead>Name</TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead>Phone</TableHead>
-                <TableHead>Department</TableHead>
+                <TableHead>Dept / Branch</TableHead>
                 <TableHead>Year</TableHead>
                 <TableHead>Room</TableHead>
                 <TableHead>Status</TableHead>
@@ -168,7 +175,12 @@ export default function Students() {
                   <TableCell className="font-medium">{student.name}</TableCell>
                   <TableCell>{student.email}</TableCell>
                   <TableCell>{student.phone || "-"}</TableCell>
-                  <TableCell>{student.department || "-"}</TableCell>
+                  <TableCell>
+                    <div className="flex flex-col">
+                      <span className="text-sm">{student.department || "-"}</span>
+                      <span className="text-xs text-muted-foreground">{student.branch || "-"}</span>
+                    </div>
+                  </TableCell>
                   <TableCell>{student.year || "-"}</TableCell>
                   <TableCell>{student.room_number || "-"}</TableCell>
                   <TableCell>

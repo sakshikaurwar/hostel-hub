@@ -35,6 +35,7 @@ export default function Login() {
     if (!name.trim() || !email.trim() || !password.trim()) { setError("Please fill in all fields"); return; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setError("Please enter a valid email"); return; }
     if (password.length < 8) { setError("Password must be at least 8 characters"); return; }
+    if (phone && (!/^\d{10}$/.test(phone))) { setError("Phone number must be exactly 10 digits"); return; }
 
     const result = await signupUser({ email, password, name, role, age: age ? parseInt(age) : undefined, phone: phone || undefined });
     console.log(result);

@@ -1,8 +1,8 @@
-﻿import os
+import os
 from flask import Flask, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
-from routes import auth_routes, admin_routes, warden_routes, common_routes, complaints_routes, attendance_routes, payments_routes, salaries_routes, health_routes
+from routes import auth_routes, admin_routes, warden_routes, common_routes, complaints_routes, attendance_routes, payments_routes, health_routes
 from werkzeug.exceptions import HTTPException
 
 load_dotenv()
@@ -37,7 +37,6 @@ app.register_blueprint(common_routes)
 app.register_blueprint(complaints_routes)
 app.register_blueprint(attendance_routes)
 app.register_blueprint(payments_routes)
-app.register_blueprint(salaries_routes)
 app.register_blueprint(health_routes)
 
 @app.route('/')

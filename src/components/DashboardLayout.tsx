@@ -21,14 +21,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         { label: "Payments", path: "/payments", icon: CreditCard },
         { label: "Students", path: "/admin/students", icon: User },
         { label: "Staff Info", path: "/admin/staff", icon: User },
-        { label: "Salaries", path: "/admin/salaries", icon: DollarSign },
         { label: "Rooms", path: "/admin/rooms", icon: LayoutDashboard },
       ]
     : user?.role === "warden"
     ? [
         ...baseNavItems,
         { label: "Staff Contacts", path: "/warden/staff-contacts", icon: User },
-        { label: "Salary", path: "/warden/salary", icon: DollarSign },
       ]
     : [
         ...baseNavItems,

@@ -12,8 +12,6 @@ import Students from "./pages/Students";
 import StaffInfo from "./pages/StaffInfo";
 import RoomAllocation from "./pages/RoomAllocation";
 import Rooms from "./pages/Rooms";
-import Salaries from "./pages/Salaries";
-import WardenStaff from "./pages/WardenStaff";
 import StaffContacts from "./pages/StaffContacts";
 import { getCurrentUser } from "./lib/dataService";
 
@@ -39,16 +37,15 @@ export default function App() {
       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/complaints" element={<ProtectedRoute><Complaints /></ProtectedRoute>} />
       <Route path="/attendance" element={<ProtectedRoute><Attendance /></ProtectedRoute>} />
+      <Route path="/attendance/:date" element={<ProtectedRoute><MarkAttendance /></ProtectedRoute>} />
       <Route path="/attendance/mark" element={<ProtectedRoute><MarkAttendance /></ProtectedRoute>} />
       <Route path="/payments" element={<ProtectedRoute><Payments /></ProtectedRoute>} />
       <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
       <Route path="/admin/students" element={<AdminRoute><Students /></AdminRoute>} />
       <Route path="/admin/staff" element={<AdminRoute><StaffInfo /></AdminRoute>} />
-      <Route path="/admin/salaries" element={<AdminRoute><Salaries /></AdminRoute>} />
       <Route path="/admin/rooms" element={<AdminRoute><Rooms /></AdminRoute>} />
       <Route path="/admin/room-allocation" element={<AdminRoute><RoomAllocation /></AdminRoute>} />
       <Route path="/warden/staff-contacts" element={<WardenRoute><StaffContacts /></WardenRoute>} />
-      <Route path="/warden/salary" element={<WardenRoute><WardenStaff /></WardenRoute>} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

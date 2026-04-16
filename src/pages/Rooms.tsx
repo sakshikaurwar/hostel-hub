@@ -21,6 +21,7 @@ export default function Rooms() {
   const [formData, setFormData] = useState({ roomNo: "", capacity: "" });
   const [availableStudents, setAvailableStudents] = useState<Student[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<number | null>(null);
+  const [allocationFees, setAllocationFees] = useState<string>("");
   const [allocating, setAllocating] = useState(false);
   const [removing, setRemoving] = useState(false);
 
@@ -30,7 +31,8 @@ export default function Rooms() {
       return;
     }
     loadData();
-  }, [user, navigate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, user?.role]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -111,10 +113,12 @@ export default function Rooms() {
 
     setAllocating(true);
     try {
-      const success = await allocateStudent(selectedStudent, selectedRoom.room_id);
+      const fees = allocationFees ? parseFloat(allocationFees) : 0;
+      const success = await allocateStudent(selectedStudent, selectedRoom.room_id, fees);
       if (success) {
         setShowAllocateModal(false);
         setSelectedStudent(null);
+        setAllocationFees("");
         await loadData();
         const updated = await getRoomDetails(selectedRoom.room_id);
         if (updated) setSelectedRoom(updated);
@@ -278,10 +282,6 @@ export default function Rooms() {
                 <div className="w-6 h-6 bg-red-100 border-2 border-red-300 rounded"></div>
                 <span>Full</span>
               </div>
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 bg-gray-200 rounded"></div>
-                <span>Maintenance</span>
-              </div>
             </div>
           </CardContent>
         </Card>
@@ -352,8 +352,7 @@ export default function Rooms() {
                     <p className={`text-lg font-semibold capitalize`}>
                       <span className={`px-2 py-1 rounded text-xs ${
                         selectedRoom.status === "available" ? "bg-green-100 text-green-800" :
-                        selectedRoom.status === "maintenance" ? "bg-gray-100 text-gray-800" :
-                        selectedRoom.occupied < selectedRoom.capacity ? "bg-yellow-100 text-yellow-800" :
+                        selectedRoom.status === "partial" ? "bg-yellow-100 text-yellow-800" :
                         "bg-red-100 text-red-800"
                       }`}>
                         {selectedRoom.status}
@@ -386,7 +385,7 @@ export default function Rooms() {
                             <p className="text-xs text-muted-foreground">{student.email}</p>
                           </div>
                           <button
-                            onClick={() => handleRemoveStudent(student.allocation_id)}
+                            onClick={() => handleRemoveStudent(student.id)}
                             disabled={removing}
                             className="text-red-600 hover:text-red-800 disabled:opacity-50"
                           >
@@ -437,6 +436,18 @@ export default function Rooms() {
                       </option>
                     ))}
                   </select>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium">Total Fees for Allocation (₹)</label>
+                  <input 
+                    type="number" 
+                    placeholder="e.g. 5000" 
+                    value={allocationFees}
+                    onChange={(e) => setAllocationFees(e.target.value)}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Assign initial total fees to automatically generate a student payment record.</p>
                 </div>
 
                 {error && <p className="text-sm text-red-600">{error}</p>}

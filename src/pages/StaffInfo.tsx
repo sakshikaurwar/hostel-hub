@@ -20,11 +20,11 @@ export default function StaffInfo() {
     email: "",
     role_type: "Cleaner" as Staff['role_type'],
     phone: "",
-    salary: "",
   });
 
   const refresh = async () => {
     const data = await getStaff();
+    console.log("[StaffInfo] Fetched", data.length, "staff from API");
     setStaff(data);
     setFilteredStaff(data);
   };
@@ -47,19 +47,22 @@ export default function StaffInfo() {
 
     const staffData = {
       ...form,
-      salary: form.salary ? parseFloat(form.salary) : undefined,
     };
 
-    if (editingStaff) {
-      await updateStaff(editingStaff.id, staffData);
-    } else {
-      await createStaff(staffData);
-    }
+    try {
+      if (editingStaff) {
+        await updateStaff(editingStaff.id, staffData);
+      } else {
+        await createStaff(staffData);
+      }
 
-    setForm({ name: "", email: "", role_type: "Cleaner", phone: "", salary: "" });
-    setShowForm(false);
-    setEditingStaff(null);
-    await refresh();
+      setForm({ name: "", email: "", role_type: "Cleaner", phone: "" });
+      setShowForm(false);
+      setEditingStaff(null);
+      await refresh();
+    } catch (err: any) {
+      alert(err.message || "Failed to save staff");
+    }
   };
 
   const handleEdit = (staffMember: Staff) => {
@@ -69,7 +72,6 @@ export default function StaffInfo() {
       email: "", // Email not returned in getStaff, so leave empty for edit
       role_type: staffMember.role_type,
       phone: staffMember.phone || "",
-      salary: staffMember.salary?.toString() || "",
     });
     setShowForm(true);
   };
@@ -91,7 +93,7 @@ export default function StaffInfo() {
           </div>
           <Dialog open={showForm} onOpenChange={setShowForm}>
             <DialogTrigger asChild>
-              <Button onClick={() => { setEditingStaff(null); setForm({ name: "", email: "", role_type: "Cleaner", phone: "", salary: "" }); }}>
+              <Button onClick={() => { setEditingStaff(null); setForm({ name: "", email: "", role_type: "Cleaner", phone: "" }); }}>
                 <Plus size={16} className="mr-2" />
                 Add Staff
               </Button>
@@ -127,10 +129,6 @@ export default function StaffInfo() {
                   <Label htmlFor="phone">Phone</Label>
                   <Input id="phone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
                 </div>
-                <div>
-                  <Label htmlFor="salary">Salary</Label>
-                  <Input id="salary" type="number" step="0.01" value={form.salary} onChange={e => setForm({ ...form, salary: e.target.value })} />
-                </div>
                 <Button type="submit">{editingStaff ? "Update" : "Create"}</Button>
               </form>
             </DialogContent>
@@ -154,7 +152,6 @@ export default function StaffInfo() {
                 <TableHead>Name</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Phone</TableHead>
-                <TableHead>Salary</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -164,7 +161,6 @@ export default function StaffInfo() {
                   <TableCell className="font-medium">{staffMember.name}</TableCell>
                   <TableCell>{staffMember.role_type}</TableCell>
                   <TableCell>{staffMember.phone || "-"}</TableCell>
-                  <TableCell>{staffMember.salary ? `$${staffMember.salary}` : "-"}</TableCell>
                   <TableCell>
                     <div className="flex space-x-2">
                       <Button variant="outline" size="sm" onClick={() => handleEdit(staffMember)}>
@@ -179,7 +175,7 @@ export default function StaffInfo() {
               ))}
               {!filteredStaff.length && (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
                     No staff found
                   </TableCell>
                 </TableRow>

@@ -67,19 +67,6 @@ CREATE TABLE payments (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
--- SALARIES
-CREATE TABLE salaries (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT,
-    amount DECIMAL(10,2),
-    month VARCHAR(20),
-    year INT,
-    status ENUM('Paid','Unpaid') DEFAULT 'Unpaid',
-    paid_date DATE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
 -- COMPLAINTS
 CREATE TABLE complaints (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -113,7 +100,6 @@ CREATE TABLE staff_details (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT,
     role_type ENUM('Warden','Cleaner','Electrician','Security'),
-    salary DECIMAL(10,2),
     join_date DATE,
     phone VARCHAR(15),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

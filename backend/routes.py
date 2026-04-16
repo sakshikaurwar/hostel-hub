@@ -1,4 +1,4 @@
-﻿from flask import Blueprint, request, jsonify, current_app, g
+from flask import Blueprint, request, jsonify, current_app, g
 from werkzeug.security import generate_password_hash, check_password_hash
 import jwt
 import datetime
@@ -16,11 +16,10 @@ common_routes = Blueprint("common", __name__, url_prefix='/api')
 complaints_routes = Blueprint("complaints", __name__, url_prefix='/api/complaints')
 attendance_routes = Blueprint("attendance", __name__, url_prefix='/api/attendance')
 payments_routes = Blueprint("payments", __name__, url_prefix='/api/payments')
-salaries_routes = Blueprint("salaries", __name__, url_prefix='/api/salaries')
 health_routes = Blueprint("health", __name__, url_prefix='/api/health')
 
 EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-ALLOWED_ROLES = {"student", "warden"}
+ALLOWED_ROLES = {"student", "warden", "staff"}
 
 
 def generate_password(length=12):
@@ -94,67 +93,122 @@ def admin_required(fn):
 # SIGNUP
 @auth_routes.route("/signup", methods=["POST"])
 def signup():
-    data = request.get_json(silent=True) or {}
-    name = str(data.get("name", "")).strip()
-    email = str(data.get("email", "")).strip().lower()
-    password = str(data.get("password", ""))
-    raw_role = str(data.get("role", "student")).strip().lower()
-
-    if not name or not email or not password:
-        return jsonify({"message": "Name, email, and password are required"}), 400
-    if len(name) < 2:
-        return jsonify({"message": "Name must be at least 2 characters"}), 400
-    if not EMAIL_REGEX.match(email):
-        return jsonify({"message": "Invalid email address"}), 400
-    if len(password) < 8:
-        return jsonify({"message": "Password must be at least 8 characters"}), 400
-
-    if raw_role == "admin":
-        return jsonify({"message": "Admin cannot be created via signup"}), 403
-    role = raw_role if raw_role in ALLOWED_ROLES else "student"
-
-    conn = None
-    cursor = None
+    # 1. Catch ALL potential errors with a global try-except
     try:
-        conn = get_db()
-        cursor = conn.cursor(MySQLdb.cursors.DictCursor)
+        # 2. Print incoming request data for debugging
+        data = request.get_json(silent=True) or {}
+        print("Incoming Signup Data:", data)
 
-        cursor.execute(
-            "SELECT COUNT(*) AS count FROM users WHERE LOWER(email) = LOWER(%s)",
-            (email,),
-        )
-        result = cursor.fetchone()
-        if result and result.get("count", 0) > 0:
-            return jsonify({"message": "Email already registered"}), 409
+        # 3. Validate all fields safely using .get() to prevent KeyError
+        name = str(data.get("name", "")).strip()
+        email = str(data.get("email", "")).strip().lower()
+        password = str(data.get("password", ""))
+        phone = str(data.get("phone", "")).strip()
+        age_val = data.get("age")
+        raw_role = str(data.get("role", "student")).strip().lower()
 
-        hashed_password = hash_password(password)
-        cursor.execute(
-            "INSERT INTO users (name, email, password, role) VALUES (%s, %s, %s, %s)",
-            (name, email, hashed_password, role),
-        )
-        conn.commit()
-        user_id = cursor.lastrowid
-    except MySQLdb.Error as exc:
-        current_app.logger.exception("Signup database error for email=%s", email)
-        if conn:
-            conn.rollback()
-        return jsonify({"message": "Database error"}), 500
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+        # Basic presence validation
+        if not name or not email or not password:
+            return jsonify({"message": "Name, email, and password are required"}), 400
+        if len(name) < 2:
+            return jsonify({"message": "Name must be at least 2 characters"}), 400
+        if not EMAIL_REGEX.match(email):
+            return jsonify({"message": "Invalid email address"}), 400
+        if len(password) < 8:
+            return jsonify({"message": "Password must be at least 8 characters"}), 400
 
-    token = create_token(user_id, role)
+        # Age conversion safeguard
+        try:
+            if age_val is not None and str(age_val).strip() != "":
+                age_val = int(age_val)
+            else:
+                age_val = None
+        except (ValueError, TypeError):
+            return jsonify({"message": "Age must be a valid number"}), 400
 
-    return jsonify({
-        "message": "User registered successfully",
-        "user_id": user_id,
-        "name": name,
-        "email": email,
-        "role": role,
-        "token": token,
-    }), 201
+        # Phone validation
+        if phone:
+            if not phone.isdigit() or len(phone) != 10:
+                return jsonify({"message": "Phone must be a 10-digit number"}), 400
+
+        if raw_role == "admin":
+            return jsonify({"message": "Admin cannot be created via signup"}), 403
+        role = raw_role if raw_role in ALLOWED_ROLES else "student"
+
+        conn = None
+        cursor = None
+        try:
+            conn = get_db()
+            cursor = conn.cursor(MySQLdb.cursors.DictCursor)
+
+            # Unique Email Check
+            cursor.execute(
+                "SELECT COUNT(*) AS count FROM users WHERE LOWER(email) = LOWER(%s)",
+                (email,),
+            )
+            if cursor.fetchone().get("count", 0) > 0:
+                return jsonify({"message": "Email already registered"}), 409
+
+            # Unique Phone Check (if provided)
+            if phone:
+                cursor.execute(
+                    "SELECT COUNT(*) AS count FROM users WHERE phone = %s",
+                    (phone,),
+                )
+                if cursor.fetchone().get("count", 0) > 0:
+                    return jsonify({"message": "Phone number already registered"}), 409
+
+            # 6. Password must be hashed using generate_password_hash
+            hashed_password = hash_password(password)
+
+            # 5. SQL INSERT query with ALL columns
+            cursor.execute(
+                "INSERT INTO users (name, email, password, role, age, phone) VALUES (%s, %s, %s, %s, %s, %s)",
+                (name, email, hashed_password, role, age_val, phone),
+            )
+            user_id = cursor.lastrowid
+            
+            if role in ["warden", "staff"]:
+                # Default role_type if none specified, or map 'warden' specifically
+                role_type = "Warden" if role == "warden" else "Cleaner"
+                cursor.execute(
+                    "INSERT INTO staff_details (user_id, role_type, phone, join_date) VALUES (%s, %s, %s, CURDATE())",
+                    (user_id, role_type, phone)
+                )
+            
+            # 8. Ensure commit happens only after successful insert
+            conn.commit()
+            
+            token = create_token(user_id, role)
+
+            # 10. Return 201 Created for success
+            return jsonify({
+                "message": "User registered successfully",
+                "user_id": user_id,
+                "token": token,
+                "role": role,
+                "name": name,
+                "email": email
+            }), 201
+
+        except MySQLdb.Error as db_err:
+            print("Database error during signup:", str(db_err))
+            if conn:
+                conn.rollback()
+            return jsonify({"message": f"Database error: {str(db_err)}"}), 500
+        finally:
+            # 9. Ensure proper connection cleanup
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    except Exception as e:
+        # Catch any other unexpected crashes (e.g., coding errors)
+        print("Unexpected error during signup:", str(e))
+        import traceback
+        traceback.print_exc()
+        return jsonify({"message": "Internal Server Error"}), 500
 
 
 # LOGIN
@@ -228,9 +282,13 @@ def login():
 def me():
     user_id = g.user.get("user_id")
     conn = get_db()
-    cursor = conn.cursor()
+    cursor = conn.cursor(MySQLdb.cursors.DictCursor)
     try:
-        cursor.execute("SELECT id, name, email, role FROM users WHERE id=%s", (user_id,))
+        cursor.execute("""
+            SELECT id, name, email, role, phone, age, address, year, 
+                   department, branch, gender, room_number, status
+            FROM users WHERE id=%s
+        """, (user_id,))
         user = cursor.fetchone()
     except MySQLdb.Error:
         return jsonify({"message": "Database error"}), 500
@@ -242,11 +300,83 @@ def me():
         return jsonify({"message": "User not found"}), 404
 
     return jsonify({
-        "id": user[0],
-        "name": user[1],
-        "email": user[2],
-        "role": user[3],
+        "id": user["id"],
+        "name": user["name"],
+        "email": user["email"],
+        "role": user["role"],
+        "phone": user["phone"] or "",
+        "age": user["age"],
+        "address": user["address"] or "",
+        "year": user["year"] or "",
+        "department": user["department"] or "",
+        "branch": user["branch"] or "",
+        "gender": user["gender"] or "",
+        "room_number": user["room_number"] or "",
+        "status": user["status"] or "inactive",
     })
+
+
+@auth_routes.route("/profile", methods=["PUT"])
+@token_required
+def update_profile():
+    """Allow logged-in users to update their own profile fields."""
+    user_id = g.user.get("user_id")
+    data = request.get_json(silent=True) or {}
+    
+    allowed_fields = ["name", "phone", "age", "address", "year", "department", "branch", "gender"]
+    update_fields = []
+    update_values = []
+    
+    for field in allowed_fields:
+        if field in data and data[field] is not None:
+            update_fields.append(f"{field} = %s")
+            update_values.append(data[field])
+    
+    if not update_fields:
+        return jsonify({"message": "No fields to update"}), 400
+    
+    update_values.append(user_id)
+    conn = get_db()
+    cursor = conn.cursor(MySQLdb.cursors.DictCursor)
+    try:
+        cursor.execute(
+            f"UPDATE users SET {', '.join(update_fields)} WHERE id = %s",
+            update_values
+        )
+        conn.commit()
+        
+        # Return updated user data
+        cursor.execute("""
+            SELECT id, name, email, role, phone, age, address, year,
+                   department, branch, gender, room_number, status
+            FROM users WHERE id = %s
+        """, (user_id,))
+        user = cursor.fetchone()
+        return jsonify({
+            "message": "Profile updated successfully",
+            "user": {
+                "id": user["id"],
+                "name": user["name"],
+                "email": user["email"],
+                "role": user["role"],
+                "phone": user["phone"] or "",
+                "age": user["age"],
+                "address": user["address"] or "",
+                "year": user["year"] or "",
+                "department": user["department"] or "",
+                "branch": user["branch"] or "",
+                "gender": user["gender"] or "",
+                "room_number": user["room_number"] or "",
+                "status": user["status"] or "inactive",
+            }
+        }), 200
+    except MySQLdb.Error as e:
+        if conn:
+            conn.rollback()
+        return jsonify({"message": f"Database error: {str(e)}"}), 500
+    finally:
+        cursor.close()
+        conn.close()
 
 
 @admin_routes.route("/dashboard", methods=["GET"])
@@ -265,19 +395,18 @@ def get_staff_contacts():
     conn = get_db()
     cursor = conn.cursor(MySQLdb.cursors.DictCursor)
     try:
+        # Include both warden and staff roles in contacts
         cursor.execute(
             """
                 SELECT u.name, sd.role_type, sd.phone
                 FROM users u
                 JOIN staff_details sd ON u.id = sd.user_id
+                WHERE u.role IN ('warden', 'staff', 'admin')
+                ORDER BY sd.role_type, u.name
             """
         )
         staff = cursor.fetchall()
-        result = [{
-            "name": row[0],
-            "role": row[1],
-            "phone": row[2],
-        } for row in staff]
+        result = [{"name": row["name"], "role": row["role_type"], "phone": row["phone"] or "N/A"} for row in staff]
         return jsonify(result), 200
     except MySQLdb.Error as e:
         current_app.logger.exception("Staff contacts database error")
@@ -293,23 +422,37 @@ def dashboard_stats():
     conn = get_db()
     cursor = conn.cursor()
     try:
-        # Optimized single query for most stats
+        # Optimized single query for all counts using simplified logic
         cursor.execute("""
             SELECT 
                 (SELECT COUNT(*) FROM users WHERE role = 'student') AS total_students,
                 (SELECT COUNT(*) FROM rooms) AS total_rooms,
-                (SELECT COUNT(DISTINCT r.room_id) FROM rooms r 
-                 INNER JOIN allocations a ON r.room_id = a.room_id 
-                 WHERE a.check_out IS NULL) AS occupied_rooms,
-                (SELECT COUNT(DISTINCT r.room_id) FROM rooms r 
-                 LEFT JOIN allocations a ON r.room_id = a.room_id AND a.check_out IS NULL 
-                 WHERE a.allocation_id IS NULL) AS available_rooms,
+                (SELECT COUNT(*) FROM rooms WHERE occupied > 0) AS occupied_rooms,
+                (SELECT COUNT(*) FROM rooms WHERE occupied = 0) AS available_rooms,
                 (SELECT COUNT(*) FROM staff_details WHERE role_type = 'Warden') AS total_wardens,
                 (SELECT COUNT(*) FROM complaints WHERE status != 'Resolved') AS pending_complaints,
                 (SELECT COUNT(*) FROM payments WHERE status IN ('Unpaid', 'Overdue')) AS pending_payments
         """)
         
         result = cursor.fetchone()
+        
+        # New: Fetch recent room allocations (latest 5)
+        cursor.execute("""
+            SELECT u.name, u.room_number, a.check_in, u.department
+            FROM allocations a
+            JOIN users u ON a.user_id = u.id
+            WHERE a.check_out IS NULL
+            ORDER BY a.check_in DESC
+            LIMIT 5
+        """)
+        recent_allocations = cursor.fetchall()
+        recent_data = [{
+            "studentName": r[0],
+            "roomNumber": r[1],
+            "checkIn": str(r[2]),
+            "department": r[3] or "N/A"
+        } for r in recent_allocations]
+
         if result:
             return jsonify({
                 "totalStudents": result[0] or 0,
@@ -319,6 +462,7 @@ def dashboard_stats():
                 "totalWardens": result[4] or 0,
                 "pendingComplaints": result[5] or 0,
                 "pendingPayments": result[6] or 0,
+                "recentAllocations": recent_data
             }), 200
         return jsonify({"message": "Failed to fetch stats"}), 500
     except MySQLdb.Error as e:
@@ -457,7 +601,7 @@ def get_attendance():
     try:
         if role == "admin" or role == "warden":
             cursor.execute("""
-                SELECT a.id, a.user_id, u.email, u.name, a.date, a.status, u.room_number
+                SELECT a.id, a.user_id, u.email, u.name, a.date, a.status, u.room_number, u.department, u.branch
                 FROM attendance a
                 JOIN users u ON a.user_id = u.id
                 WHERE u.role = 'student'
@@ -465,7 +609,7 @@ def get_attendance():
             """)
         else:
             cursor.execute("""
-                SELECT a.id, a.user_id, u.email, u.name, a.date, a.status, u.room_number
+                SELECT a.id, a.user_id, u.email, u.name, a.date, a.status, u.room_number, u.department, u.branch
                 FROM attendance a
                 JOIN users u ON a.user_id = u.id
                 WHERE a.user_id = %s AND u.role = 'student'
@@ -475,14 +619,74 @@ def get_attendance():
         records = cursor.fetchall()
         result = [{
             "id": r[0],
+            "studentId": r[1],
             "studentEmail": r[2],
             "studentName": r[3],
             "date": str(r[4]),
             "status": r[5],
             "roomNumber": r[6] or "N/A",
+            "department": r[7] or "N/A",
+            "branch": r[8] or "N/A",
             "markedBy": "Warden"
         } for r in records]
         return jsonify(result), 200
+    except MySQLdb.Error as e:
+        return jsonify({"message": f"Database error: {str(e)}"}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@attendance_routes.route("/date/<date>", methods=["GET"])
+@token_required
+def get_attendance_by_date(date):
+    role = g.user.get("role")
+    if role not in ["admin", "warden"]:
+        return jsonify({"message": "Access denied"}), 403
+    
+    conn = get_db()
+    cursor = conn.cursor(MySQLdb.cursors.DictCursor)
+    try:
+        cursor.execute("""
+            SELECT 
+                r.room_no,
+                u.id AS studentId,
+                u.name AS studentName,
+                u.email AS studentEmail,
+                u.department,
+                u.branch,
+                COALESCE(a.status, 'NotMarked') AS status,
+                a.id AS id
+            FROM allocations al
+            JOIN users u ON al.user_id = u.id
+            JOIN rooms r ON al.room_id = r.room_id
+            LEFT JOIN attendance a ON u.id = a.user_id AND a.date = %s
+            WHERE al.check_out IS NULL
+            ORDER BY r.room_no, u.name
+        """, (date,))
+        
+        records = cursor.fetchall()
+        
+        # Group by room_no
+        grouped = {}
+        for r in records:
+            room_no = str(r['room_no'])
+            if room_no not in grouped:
+                grouped[room_no] = []
+            
+            grouped[room_no].append({
+                "id": r['id'],
+                "studentId": r['studentId'],
+                "studentEmail": r['studentEmail'],
+                "studentName": r['studentName'],
+                "date": date,
+                "status": r['status'],
+                "roomNumber": room_no,
+                "department": r['department'] or "N/A",
+                "branch": r['branch'] or "N/A"
+            })
+            
+        return jsonify(grouped), 200
     except MySQLdb.Error as e:
         return jsonify({"message": f"Database error: {str(e)}"}), 500
     finally:
@@ -632,17 +836,35 @@ def get_payments():
 
 
 @payments_routes.route("/<int:payment_id>", methods=["PUT"])
-@admin_required
+@token_required
 def update_payment(payment_id):
+    role = g.user.get("role")
+    user_id = g.user.get("user_id")
     data = request.get_json(silent=True) or {}
     new_status = str(data.get("status", "")).strip()
     
     if new_status not in ["Paid", "Unpaid", "Overdue"]:
         return jsonify({"message": "Invalid status"}), 400
     
+    # Wardens cannot update payments
+    if role == "warden":
+        return jsonify({"message": "Access denied"}), 403
+    
     conn = get_db()
     cursor = conn.cursor()
     try:
+        # Students can only mark their OWN payments as Paid
+        if role == "student":
+            if new_status != "Paid":
+                return jsonify({"message": "Students can only mark payments as Paid"}), 403
+            # Verify this payment belongs to the student
+            cursor.execute("SELECT user_id FROM payments WHERE id = %s", (payment_id,))
+            row = cursor.fetchone()
+            if not row:
+                return jsonify({"message": "Payment not found"}), 404
+            if row[0] != user_id:
+                return jsonify({"message": "Access denied: not your payment"}), 403
+        
         if new_status == "Paid":
             paid_date = datetime.datetime.now().strftime("%Y-%m-%d")
             cursor.execute("""
@@ -690,173 +912,6 @@ def create_payment():
         """, (user_id, description, amount, total_fees, due_date, "Unpaid"))
         conn.commit()
         return jsonify({"message": "Payment created"}), 201
-    except MySQLdb.Error as e:
-        return jsonify({"message": f"Database error: {str(e)}"}), 500
-    finally:
-        cursor.close()
-        conn.close()
-
-
-# ==================== SALARIES ENDPOINTS ====================
-
-@salaries_routes.route("", methods=["GET"])
-@token_required
-def get_salaries():
-    user_id = g.user.get("user_id")
-    role = g.user.get("role")
-    
-    conn = get_db()
-    cursor = conn.cursor()
-    try:
-        query = """
-            SELECT s.id, s.user_id, COALESCE(sd.role_type, 'Staff'), u.name, s.month, s.year, s.amount, s.status, s.paid_date
-            FROM salaries s
-            JOIN users u ON s.user_id = u.id
-            LEFT JOIN staff_details sd ON sd.user_id = u.id
-            WHERE u.role = 'warden'
-        """
-        params = []
-
-        if role == "admin":
-            query += " ORDER BY s.year DESC, s.month DESC, u.name"
-        elif role == "warden":
-            query += " AND u.id = %s ORDER BY s.year DESC, s.month DESC"
-            params.append(user_id)
-        else:
-            return jsonify({"message": "Access denied"}), 403
-
-        cursor.execute(query, params)
-        salaries = cursor.fetchall()
-        result = [{
-            "id": s[0],
-            "staffId": s[1],
-            "roleType": s[2],
-            "staffName": s[3],
-            "monthYear": f"{s[5]}-{int(s[4]):02d}",
-            "amount": float(s[6]),
-            "status": s[7],
-            "paidDate": str(s[8]) if s[8] else None,
-        } for s in salaries]
-        return jsonify(result), 200
-    except MySQLdb.Error as e:
-        return jsonify({"message": f"Database error: {str(e)}"}), 500
-    finally:
-        cursor.close()
-        conn.close()
-
-
-@warden_routes.route("/salary", methods=["GET"])
-@token_required
-def get_warden_salary():
-    if g.user.get("role") != "warden":
-        return jsonify({"message": "Unauthorized"}), 403
-
-    user_id = g.user.get("user_id")
-    conn = get_db()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("""
-            SELECT id, month, year, amount, status, paid_date
-            FROM salaries
-            WHERE user_id = %s
-            ORDER BY year DESC,
-              FIELD(month, 'January', 'February', 'March', 'April', 'May', 'June',
-                    'July', 'August', 'September', 'October', 'November', 'December') DESC
-        """, (user_id,))
-        salaries = cursor.fetchall()
-        result = [{
-            "id": row[0],
-            "month": row[1],
-            "year": row[2],
-            "amount": float(row[3]),
-            "status": row[4],
-            "paid_date": str(row[5]) if row[5] else None,
-        } for row in salaries]
-        return jsonify(result), 200
-    except MySQLdb.Error as e:
-        return jsonify({"message": f"Database error: {str(e)}"}), 500
-    finally:
-        cursor.close()
-        conn.close()
-
-
-@salaries_routes.route("", methods=["POST"])
-@admin_required
-def create_salary():
-    data = request.get_json(silent=True) or {}
-    staff_id = data.get("staffId")
-    month_year = str(data.get("monthYear", "")).strip()
-    amount = data.get("amount")
-    
-    if not staff_id or not month_year or not amount:
-        return jsonify({"message": "staffId, monthYear, and amount are required"}), 400
-
-    try:
-        year, month = month_year.split("-")
-        month = int(month)
-        year = int(year)
-    except (ValueError, AttributeError):
-        return jsonify({"message": "monthYear must be in YYYY-MM format"}), 400
-
-    if month < 1 or month > 12:
-        return jsonify({"message": "Invalid month in monthYear"}), 400
-
-    conn = get_db()
-    cursor = conn.cursor()
-    try:
-        cursor.execute(
-            "SELECT u.role FROM users u WHERE u.id = %s",
-            (staff_id,),
-        )
-        user = cursor.fetchone()
-        if not user or user[0] != 'warden':
-            return jsonify({"message": "Salary records can only be created for warden/staff users"}), 400
-
-        cursor.execute("SELECT id FROM salaries WHERE user_id = %s AND month = %s AND year = %s", (staff_id, month, year))
-        existing = cursor.fetchone()
-        if existing:
-            return jsonify({"message": "Salary already exists for this staff and month"}), 409
-        
-        cursor.execute("""
-            INSERT INTO salaries (user_id, month, year, amount, status)
-            VALUES (%s, %s, %s, %s, %s)
-        """, (staff_id, month, year, amount, "Unpaid"))
-        conn.commit()
-        salary_id = cursor.lastrowid
-        
-        return jsonify({
-            "message": "Salary created successfully",
-            "id": salary_id
-        }), 201
-    except MySQLdb.Error as e:
-        return jsonify({"message": f"Database error: {str(e)}"}), 500
-    finally:
-        cursor.close()
-        conn.close()
-
-
-@salaries_routes.route("/<int:salary_id>", methods=["PUT"])
-@admin_required
-def update_salary(salary_id):
-    data = request.get_json(silent=True) or {}
-    new_status = str(data.get("status", "")).strip()
-    
-    if new_status not in ["Paid", "Unpaid"]:
-        return jsonify({"message": "Invalid status"}), 400
-    
-    conn = get_db()
-    cursor = conn.cursor()
-    try:
-        if new_status == "Paid":
-            paid_date = datetime.datetime.now().strftime("%Y-%m-%d")
-            cursor.execute("""
-                UPDATE salaries SET status = %s, paid_date = %s WHERE id = %s
-            """, (new_status, paid_date, salary_id))
-        else:
-            cursor.execute("UPDATE salaries SET status = %s WHERE id = %s", (new_status, salary_id))
-        
-        conn.commit()
-        return jsonify({"message": "Salary updated"}), 200
     except MySQLdb.Error as e:
         return jsonify({"message": f"Database error: {str(e)}"}), 500
     finally:
@@ -1066,7 +1121,7 @@ def get_staff():
     cursor = conn.cursor(MySQLdb.cursors.DictCursor)
     try:
         cursor.execute("""
-            SELECT s.id, u.name, s.role_type, s.phone, s.salary
+            SELECT s.id, u.name, s.role_type, s.phone
             FROM staff_details s
             JOIN users u ON s.user_id = u.id
             ORDER BY u.name
@@ -1088,7 +1143,6 @@ def create_staff():
     email = str(data.get("email", "")).strip().lower()
     role_type = str(data.get("role_type", "")).strip()
     phone = str(data.get("phone", "")).strip()
-    salary = data.get("salary")
     password = str(data.get("password", "")).strip()
 
     if not name or not email or not role_type:
@@ -1127,8 +1181,8 @@ def create_staff():
         )
         user_id = cursor.lastrowid
         cursor.execute(
-            "INSERT INTO staff_details (user_id, role_type, phone, salary, join_date) VALUES (%s, %s, %s, %s, %s)",
-            (user_id, role_type, phone, salary, datetime.datetime.now().date()),
+            "INSERT INTO staff_details (user_id, role_type, phone, join_date) VALUES (%s, %s, %s, %s)",
+            (user_id, role_type, phone, datetime.datetime.now().date()),
         )
         conn.commit()
     except MySQLdb.Error as exc:
@@ -1162,7 +1216,6 @@ def update_staff(staff_id):
     email = str(data.get("email", "")).strip().lower()
     role_type = str(data.get("role_type", "")).strip()
     phone = str(data.get("phone", "")).strip()
-    salary = data.get("salary")
 
     if role_type and role_type not in ['Warden', 'Cleaner', 'Electrician', 'Security']:
         return jsonify({"message": "Invalid role_type"}), 400
@@ -1210,9 +1263,6 @@ def update_staff(staff_id):
         if phone:
             update_fields.append("phone = %s")
             update_values.append(phone)
-        if salary is not None:
-            update_fields.append("salary = %s")
-            update_values.append(salary)
 
         if update_fields:
             update_values.append(staff_id)
@@ -1267,61 +1317,103 @@ def delete_staff(staff_id):
 
 # ==================== ADMIN ROOM ALLOCATION ENDPOINTS ====================
 
+def sync_room_occupancy(cursor, room_id):
+    """Ensure rooms.occupied matches active allocations count."""
+    cursor.execute("""
+        UPDATE rooms r 
+        SET occupied = (
+            SELECT COUNT(*) FROM allocations a 
+            WHERE a.room_id = %s AND a.check_out IS NULL
+        )
+        WHERE r.room_id = %s
+    """, (room_id, room_id))
+    
+    # Also update status dynamic logic
+    cursor.execute("SELECT occupied, capacity FROM rooms WHERE room_id = %s", (room_id,))
+    room = cursor.fetchone()
+    if room:
+        occ, cap = room['occupied'], room['capacity']
+        new_status = 'full' if occ >= cap else ('partial' if occ > 0 else 'available')
+        cursor.execute("UPDATE rooms SET status = %s WHERE room_id = %s", (new_status, room_id))
+
 @admin_routes.route("/allocate-room", methods=["POST"])
 @admin_required
 def allocate_room():
     data = request.get_json(silent=True) or {}
-    user_id = data.get("user_id")
-    room_id = data.get("room_id")
+    print("DATA RECEIVED:", data) # Step 1
+    
+    # Step 2: Extract fields safely
+    user_id = data.get("user_id") or data.get("studentId")
+    room_id = data.get("room_id") or data.get("roomId")
+    room_fee = float(data.get("room_fee") or data.get("fees") or 0)    
+    print("Parsed:", user_id, room_id, room_fee) # Step 3
+    
+    # Step 4: Validate
     if not user_id or not room_id:
-        return jsonify({"message": "user_id and room_id are required"}), 400
+        return jsonify({"message": "Missing user_id or room_id"}), 400
 
     conn = None
     cursor = None
     try:
         conn = get_db()
         cursor = conn.cursor(MySQLdb.cursors.DictCursor)
+        
+        # Step 5: Check if user exists
         cursor.execute("SELECT id, room_number FROM users WHERE id = %s AND role = 'student'", (user_id,))
         user = cursor.fetchone()
         if not user:
-            return jsonify({"message": "User not found or not a student"}), 404
-        cursor.execute("SELECT room_no, capacity, occupied, status FROM rooms WHERE room_id = %s", (room_id,))
+            return jsonify({"message": f"Student with ID {user_id} not found"}), 404
+        
+        # Step 6: Check if room exists
+        cursor.execute("SELECT room_id, capacity, occupied, room_no FROM rooms WHERE room_id = %s", (room_id,))
         room = cursor.fetchone()
         if not room:
-            return jsonify({"message": "Room not found"}), 404
-        if room['status'] != 'available':
-            return jsonify({"message": "Room is not available for allocation"}), 400
+            return jsonify({"message": f"Room with ID {room_id} not found"}), 404
+        
+        # Step 7: Prevent over-allocation
         if room['occupied'] >= room['capacity']:
-            return jsonify({"message": "Room is full"}), 400
-        if user['room_number']:
-            return jsonify({"message": "User already has a room"}), 400
+            return jsonify({"message": f"Room {room['room_no']} is already full"}), 400
+        
+        # Check active allocation (NEW LOGIC)
+        cursor.execute(
+            "SELECT * FROM allocations WHERE user_id = %s AND check_out IS NULL",
+            (user_id,)
+        )
+        existing = cursor.fetchone()
 
-        check_in = datetime.datetime.now().date()
+        if existing:
+            return jsonify({"message": "Student already allocated"}), 400
+        # Step 8: Correct INSERT query with CURDATE()
         cursor.execute(
-            "INSERT INTO allocations (user_id, room_id, check_in) VALUES (%s, %s, %s)",
-            (user_id, room_id, check_in),
+            "INSERT INTO allocations (user_id, room_id, check_in, room_fee) VALUES (%s, %s, CURDATE(), %s)",
+            (user_id, room_id, room_fee),
         )
-        cursor.execute(
-            "UPDATE rooms SET occupied = occupied + 1, status = %s WHERE room_id = %s",
-            ("occupied" if room['occupied'] + 1 >= room['capacity'] else "available", room_id),
-        )
+        
+        # Step 9: Update room occupancy
+        cursor.execute("UPDATE rooms SET occupied = occupied + 1 WHERE room_id = %s", (room_id,))
+        
+        # Optional but good: update status
+        new_occ = room['occupied'] + 1
+        new_status = 'full' if new_occ >= room['capacity'] else 'partial'
+        cursor.execute("UPDATE rooms SET status = %s WHERE room_id = %s", (new_status, room_id))
+
+        # Update student profile
         cursor.execute(
             "UPDATE users SET room_number = %s, status = 'active' WHERE id = %s",
             (room['room_no'], user_id),
         )
         conn.commit()
-    except MySQLdb.Error as exc:
-        current_app.logger.exception("Allocate room database error")
+        return jsonify({"message": "Room allocated successfully", "room_no": room['room_no']}), 200
+    except Exception as e: # Step 10: FULL error logging
+        print("ALLOCATION ERROR:", e)
         if conn:
             conn.rollback()
-        return jsonify({"message": "Database error"}), 500
+        return jsonify({"message": f"Allocation failed: {str(e)}"}), 500
     finally:
         if cursor:
             cursor.close()
         if conn:
             conn.close()
-
-    return jsonify({"message": "Room allocated successfully"}), 200
 
 
 @admin_routes.route("/deallocate-room", methods=["POST"])
@@ -1351,20 +1443,9 @@ def deallocate_room():
             "UPDATE allocations SET check_out = %s WHERE allocation_id = %s",
             (datetime.datetime.now().date(), allocation['allocation_id']),
         )
-        cursor.execute(
-            "UPDATE rooms SET occupied = occupied - 1 WHERE room_id = %s",
-            (allocation['room_id'],),
-        )
-        cursor.execute("SELECT occupied, capacity FROM rooms WHERE room_id = %s", (allocation['room_id'],))
-        room = cursor.fetchone()
-        if room:
-            new_occupied = room[0]
-            capacity = room[1]
-            new_status = 'available' if new_occupied < capacity else 'occupied'
-            cursor.execute(
-                "UPDATE rooms SET status = %s WHERE room_id = %s",
-                (new_status, allocation['room_id']),
-            )
+        
+        sync_room_occupancy(cursor, allocation['room_id'])
+        
         cursor.execute(
             "UPDATE users SET room_number = NULL, status = 'inactive' WHERE id = %s AND role = 'student'",
             (user_id,),
@@ -1401,8 +1482,8 @@ def get_rooms():
                    COUNT(a.allocation_id) AS occupied,
                    CASE 
                        WHEN COUNT(a.allocation_id) = 0 THEN 'available'
-                       WHEN COUNT(a.allocation_id) = r.capacity THEN 'occupied'
-                       ELSE 'available'
+                       WHEN COUNT(a.allocation_id) < r.capacity THEN 'partial'
+                       ELSE 'full'
                    END AS status
             FROM rooms r
             LEFT JOIN allocations a ON r.room_id = a.room_id AND a.check_out IS NULL
@@ -1437,23 +1518,13 @@ def get_rooms_summary():
     cursor = conn.cursor()
     try:
         cursor.execute("""
-    SELECT 
-        COUNT(*) AS total_rooms,
-        SUM(CASE WHEN occupied = 0 THEN 1 ELSE 0 END) AS available_rooms,
-        SUM(CASE WHEN occupied > 0 AND occupied < capacity THEN 1 ELSE 0 END) AS partial_rooms,
-        SUM(CASE WHEN occupied = capacity THEN 1 ELSE 0 END) AS occupied_rooms
-    FROM (
-        SELECT 
-            r.room_id,
-            r.capacity,
-            COUNT(a.user_id) AS occupied
-        FROM rooms r
-        LEFT JOIN allocations a 
-            ON r.room_id = a.room_id 
-            AND a.check_out IS NULL
-        GROUP BY r.room_id, r.capacity
-     ) AS room_counts
-    """)
+            SELECT 
+                COUNT(*) AS total_rooms,
+                SUM(CASE WHEN occupied = 0 THEN 1 ELSE 0 END) AS available_rooms,
+                SUM(CASE WHEN occupied > 0 AND occupied < capacity THEN 1 ELSE 0 END) AS partial_rooms,
+                SUM(CASE WHEN occupied = capacity THEN 1 ELSE 0 END) AS occupied_rooms
+            FROM rooms
+        """)
         
         result = cursor.fetchone()
         if result:
@@ -1466,6 +1537,7 @@ def get_rooms_summary():
         return jsonify({
             "totalRooms": 0,
             "availableRooms": 0,
+            "partialRooms": 0,
             "occupiedRooms": 0,
         }), 200
     except MySQLdb.Error as e:
@@ -1492,8 +1564,8 @@ def get_room_details(room_id):
                    COUNT(a.allocation_id) AS occupied,
                    CASE 
                        WHEN COUNT(a.allocation_id) = 0 THEN 'available'
-                       WHEN COUNT(a.allocation_id) = r.capacity THEN 'occupied'
-                       ELSE 'partial'
+                       WHEN COUNT(a.allocation_id) < r.capacity THEN 'partial'
+                       ELSE 'full'
                    END AS status
             FROM rooms r
             LEFT JOIN allocations a ON r.room_id = a.room_id AND a.check_out IS NULL
@@ -1546,13 +1618,14 @@ def create_room():
     hostel_id = data.get("hostel_id", 1)
     
     if not room_no or not capacity:
-        return jsonify({"message": "room_no and capacity are required"}), 400
+        return jsonify({"message": "Room number and capacity are required"}), 400
     
     try:
         capacity = int(capacity)
         room_no = int(room_no)
+        hostel_id = int(hostel_id)
     except (ValueError, TypeError):
-        return jsonify({"message": "room_no and capacity must be numbers"}), 400
+        return jsonify({"message": "Room number, capacity and hostel ID must be numeric"}), 400
     
     if capacity < 1:
         return jsonify({"message": "Capacity must be at least 1"}), 400
@@ -1560,12 +1633,18 @@ def create_room():
     conn = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT room_id FROM rooms WHERE room_no = %s", (room_no,))
+        # Validate hostel_id
+        cursor.execute("SELECT hostel_id FROM hostels WHERE hostel_id = %s", (hostel_id,))
+        if not cursor.fetchone():
+            return jsonify({"message": f"Hostel with ID {hostel_id} does not exist"}), 404
+
+        # Check for duplicate room_no within the SAME hostel
+        cursor.execute("SELECT room_id FROM rooms WHERE room_no = %s AND hostel_id = %s", (room_no, hostel_id))
         if cursor.fetchone():
-            return jsonify({"message": "Room number already exists"}), 409
+            return jsonify({"message": f"Room number {room_no} already exists in this hostel"}), 409
         
         cursor.execute(
-            "INSERT INTO rooms (hostel_id, room_no, capacity) VALUES (%s, %s, %s)",
+            "INSERT INTO rooms (hostel_id, room_no, capacity, occupied, status) VALUES (%s, %s, %s, 0, 'available')",
             (hostel_id, room_no, capacity)
         )
         conn.commit()
@@ -1576,6 +1655,7 @@ def create_room():
             "room_id": room_id,
             "room_no": room_no,
             "capacity": capacity,
+            "hostel_id": hostel_id
         }), 201
     except MySQLdb.Error as e:
         current_app.logger.exception("Create room database error")
@@ -1628,6 +1708,7 @@ def allocate_student():
     data = request.get_json(silent=True) or {}
     user_id = data.get("user_id")
     room_id = data.get("room_id")
+    total_fees = data.get("total_fees", 0)
     
     if not user_id or not room_id:
         return jsonify({"message": "user_id and room_id are required"}), 400
@@ -1644,7 +1725,7 @@ def allocate_student():
             return jsonify({"message": "Student is already allocated to a room"}), 409
         
         # Check room exists and get capacity
-        cursor.execute("SELECT capacity FROM rooms WHERE room_id = %s", (room_id,))
+        cursor.execute("SELECT capacity, room_no FROM rooms WHERE room_id = %s", (room_id,))
         room = cursor.fetchone()
         if not room:
             return jsonify({"message": "Room not found"}), 404
@@ -1664,6 +1745,22 @@ def allocate_student():
             "INSERT INTO allocations (user_id, room_id, check_in) VALUES (%s, %s, %s)",
             (user_id, room_id, check_in)
         )
+        
+        # System Integrity Fix (Step 3): Bind user's room_number automatically
+        cursor.execute("UPDATE users SET room_number = %s WHERE id = %s", (room["room_no"], user_id))
+        
+        # System Integrity Fix (Step 4): Dispatch Total Fees Payment entry dynamically
+        try:
+            total_fees_val = float(total_fees)
+        except (ValueError, TypeError):
+            total_fees_val = 0.0
+            
+        if total_fees_val > 0:
+            cursor.execute(
+                "INSERT INTO payments (user_id, description, amount, total_fees, due_date, status) VALUES (%s, %s, %s, %s, %s, %s)",
+                (user_id, "Room Allocation Fee", total_fees_val, total_fees_val, check_in, "Unpaid")
+            )
+            
         conn.commit()
         
         return jsonify({
@@ -1700,6 +1797,20 @@ def remove_student_allocation(allocation_id):
             "UPDATE allocations SET check_out = %s WHERE allocation_id = %s",
             (check_out, allocation_id)
         )
+        
+        # Get user_id for this allocation so we can clear their room_number
+        cursor.execute(
+            "SELECT user_id FROM allocations WHERE allocation_id = %s",
+            (allocation_id,)
+        )
+        alloc = cursor.fetchone()
+        if alloc:
+            freed_user_id = alloc[0]
+            cursor.execute(
+                "UPDATE users SET room_number = NULL, status = 'inactive' WHERE id = %s AND role = 'student'",
+                (freed_user_id,)
+            )
+        
         conn.commit()
         
         return jsonify({"message": "Student removed successfully"}), 200
@@ -1718,13 +1829,13 @@ def remove_student_allocation(allocation_id):
 @health_routes.route("/db", methods=["GET"])
 def health_db():
     """Test database connectivity"""
+    conn = None
+    cursor = None
     try:
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute("SELECT 1")
         result = cursor.fetchone()
-        cursor.close()
-        conn.close()
         
         if result:
             return jsonify({
@@ -1746,6 +1857,11 @@ def health_db():
             "error": str(e),
             "message": "Unexpected error"
         }), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 
 @health_routes.route("/full-check", methods=["GET"])
